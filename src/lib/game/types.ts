@@ -3,6 +3,8 @@ export type Lane = 0 | 1 | 2;
 export type Note = {
 	t: number;
 	lane: Lane;
+	/** Hold note duration in seconds. When present, renders as a long bar. */
+	duration?: number;
 };
 
 export type Difficulty = 'easy' | 'normal' | 'hard';

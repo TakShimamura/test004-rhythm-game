@@ -3,7 +3,7 @@ import { DEFAULT_CONFIG, emptyScore } from './types.js';
 import { createInputHandler, type InputHandler } from './input.js';
 import { createGameAudio, generateBackingTrack, playHitSound, type GameAudio } from './audio.js';
 import { createRenderer, type JudgmentFlash, type Renderer } from './renderer.js';
-import { applyJudgment, judge } from './scoring.js';
+import { applyJudgment, judge, judgeHold } from './scoring.js';
 
 export type Engine = {
 	start: () => void;
@@ -31,6 +31,9 @@ export function createEngine(
 	const hitNotes = new Set<number>();
 	const flashes: JudgmentFlash[] = [];
 
+	// Hold note tracking: noteIndex -> { startTime (audio clock when note was first hit) }
+	const activeHolds = new Map<number, { startTime: number }>();
+
 	const audio: GameAudio = createGameAudio();
 	const input: InputHandler = createInputHandler(config);
 	const renderer: Renderer = createRenderer({ canvas, chart, config });
@@ -57,7 +60,7 @@ export function createEngine(
 			let bestDelta = Infinity;
 
 			for (let i = 0; i < chart.notes.length; i++) {
-				if (hitNotes.has(i)) continue;
+				if (hitNotes.has(i) || activeHolds.has(i)) continue;
 				const note = chart.notes[i];
 				if (note.lane !== event.lane) continue;
 				const delta = (audioTime - note.t - offsetSec) * 1000;
@@ -68,26 +71,64 @@ export function createEngine(
 			}
 
 			if (bestIdx >= 0 && Math.abs(bestDelta) <= config.goodWindowMs) {
-				const grade = judge(bestDelta, config);
-				hitNotes.add(bestIdx);
+				const note = chart.notes[bestIdx];
+
+				if (note.duration && note.duration > 0) {
+					// Hold note: start tracking, don't score yet
+					activeHolds.set(bestIdx, { startTime: currentTime });
+					playHitSound(audio.ctx, 'good');
+				} else {
+					// Regular tap note
+					const grade = judge(bestDelta, config);
+					hitNotes.add(bestIdx);
+					setScore(applyJudgment(score, grade));
+
+					flashes.push({
+						grade,
+						lane: event.lane,
+						time: performance.now() / 1000,
+					});
+
+					renderer.spawnParticles(event.lane, grade);
+					if (grade !== 'miss') {
+						playHitSound(audio.ctx, grade);
+					}
+				}
+			}
+		}
+
+		// Process active hold notes
+		for (const [noteIdx, hold] of activeHolds) {
+			const note = chart.notes[noteIdx];
+			const duration = note.duration!;
+			const elapsed = currentTime - hold.startTime;
+			const isLaneHeld = input.lanePressed(note.lane);
+			const holdComplete = elapsed >= duration;
+
+			if (!isLaneHeld || holdComplete) {
+				// Player released or hold duration completed -- judge it
+				const heldRatio = Math.min(elapsed / duration, 1);
+				const grade = judgeHold(heldRatio);
+				activeHolds.delete(noteIdx);
+				hitNotes.add(noteIdx);
 				setScore(applyJudgment(score, grade));
 
 				flashes.push({
 					grade,
-					lane: event.lane,
+					lane: note.lane,
 					time: performance.now() / 1000,
 				});
 
-				renderer.spawnParticles(event.lane, grade);
+				renderer.spawnParticles(note.lane, grade);
 				if (grade !== 'miss') {
 					playHitSound(audio.ctx, grade);
 				}
 			}
 		}
 
-		// check for missed notes (passed the hit zone by too much)
+		// Check for missed notes (passed the hit zone by too much)
 		for (let i = 0; i < chart.notes.length; i++) {
-			if (hitNotes.has(i)) continue;
+			if (hitNotes.has(i) || activeHolds.has(i)) continue;
 			const note = chart.notes[i];
 			const delta = (currentTime - note.t - offsetSec) * 1000;
 			if (delta > config.goodWindowMs) {

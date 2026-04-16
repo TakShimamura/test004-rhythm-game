@@ -142,6 +142,56 @@ function addLeadSynth(p: SynthParams, time: number, freq: number, dur: number, v
 	}
 }
 
+/** Pad synth: slow-attack sustained chord built from multiple detuned sines. */
+function addPadSynth(p: SynthParams, time: number, freqs: number[], dur: number, vol = 0.06) {
+	const start = Math.floor(time * p.sampleRate);
+	const len = Math.ceil(dur * p.sampleRate);
+	for (let i = 0; i < len && start + i < p.data.length; i++) {
+		const t = i / p.sampleRate;
+		// slow attack (0.3s), sustain, slow release (0.5s)
+		const attack = Math.min(t / 0.3, 1);
+		const release = t > dur - 0.5 ? (dur - t) / 0.5 : 1;
+		const env = attack * Math.max(release, 0);
+		let wave = 0;
+		for (const freq of freqs) {
+			// slightly detune each voice for richness
+			wave += Math.sin(2 * Math.PI * freq * t);
+			wave += Math.sin(2 * Math.PI * (freq * 1.003) * t) * 0.7;
+			wave += Math.sin(2 * Math.PI * (freq * 0.997) * t) * 0.7;
+		}
+		p.data[start + i] += wave * env * vol / Math.max(freqs.length * 2.4, 1);
+	}
+}
+
+/** Arp synth: fast repeating arpeggiated notes (classic trance arp). */
+function addArpSynth(
+	p: SynthParams,
+	time: number,
+	freqs: number[],
+	dur: number,
+	rate: number,
+	vol = 0.08,
+) {
+	const start = Math.floor(time * p.sampleRate);
+	const len = Math.ceil(dur * p.sampleRate);
+	const noteLen = 1 / rate; // seconds per arp step
+	for (let i = 0; i < len && start + i < p.data.length; i++) {
+		const t = i / p.sampleRate;
+		const stepIdx = Math.floor(t / noteLen);
+		const freq = freqs[stepIdx % freqs.length];
+		const localT = t - stepIdx * noteLen;
+		// sharp attack, quick decay per step
+		const env = Math.exp(-localT * 12) * 0.8 + 0.2 * Math.max(1 - localT / noteLen, 0);
+		// thin sawtooth
+		const phase = (freq * t) % 1;
+		const wave = (phase * 2 - 1) * 0.6 + Math.sin(2 * Math.PI * freq * t) * 0.4;
+		// global envelope
+		const globalAttack = Math.min(t / 0.05, 1);
+		const globalRelease = t > dur - 0.1 ? (dur - t) / 0.1 : 1;
+		p.data[start + i] += wave * env * globalAttack * Math.max(globalRelease, 0) * vol;
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Style pattern generators
 // ---------------------------------------------------------------------------
@@ -159,22 +209,30 @@ type StyleGenerator = (p: SynthParams, bpm: number, durationSec: number) => void
 const generateElectro: StyleGenerator = (p, bpm, durationSec) => {
 	const beat = 60 / bpm;
 	const eighth = beat / 2;
+	const sixteenth = beat / 4;
+	let barCount = 0;
 
 	for (let t = 0; t < durationSec; t += beat * 4) {
-		// 4-bar drum pattern
+		const isFillBar = (barCount + 1) % 8 === 0; // fill every 8 bars
 		for (let b = 0; b < 4 && t + b * beat < durationSec; b++) {
 			const bt = t + b * beat;
-			// kick on every beat (4-on-the-floor)
 			addBassDrum(p, bt, 0.35);
-			// snare on 2 and 4
 			if (b === 1 || b === 3) addSnare(p, bt, 0.2);
-			// hi-hats on every eighth
 			addHihat(p, bt, 0.1);
 			addHihat(p, bt + eighth, 0.07);
+
+			// drum fill on last bar of every 8
+			if (isFillBar && b >= 2) {
+				for (let s = 0; s < 4; s++) {
+					addSnare(p, bt + s * sixteenth, 0.12 + s * 0.03);
+				}
+				addOpenHihat(p, bt + eighth, 0.08);
+			}
 		}
+		barCount++;
 	}
 
-	// bass line — electro pattern
+	// bass line
 	const bassNotes = [NOTES.C2, NOTES.C2, NOTES.Bb2, NOTES.G2, NOTES.C2, NOTES.E2, NOTES.G2, NOTES.Bb2];
 	let bassIdx = 0;
 	for (let t = 0; t < durationSec; t += beat) {
@@ -183,7 +241,7 @@ const generateElectro: StyleGenerator = (p, bpm, durationSec) => {
 		bassIdx++;
 	}
 
-	// lead melody — simple arpeggiated phrase every 4 bars
+	// lead melody
 	const leadPhrase = [NOTES.C4, NOTES.E4, NOTES.G4, NOTES.Bb4, NOTES.G4, NOTES.E4, NOTES.C4, NOTES.D4];
 	let leadIdx = 0;
 	for (let t = beat * 4; t < durationSec; t += beat) {
@@ -192,20 +250,36 @@ const generateElectro: StyleGenerator = (p, bpm, durationSec) => {
 		}
 		leadIdx++;
 	}
+
+	// arp synth — trance-style arp layered every 8 bars
+	const arpNotes = [NOTES.C4, NOTES.E4, NOTES.G4, NOTES.C5, NOTES.G4, NOTES.E4];
+	for (let t = beat * 8; t < durationSec; t += beat * 16) {
+		addArpSynth(p, t, arpNotes, beat * 8, bpm / 15, 0.06);
+	}
 };
 
 const generateDnb: StyleGenerator = (p, bpm, durationSec) => {
 	const beat = 60 / bpm;
 	const sixteenth = beat / 4;
+	let barCount = 0;
 
 	for (let t = 0; t < durationSec; t += beat * 4) {
+		const isBreakbar = barCount % 4 >= 2; // alternate drum pattern every 2 bars
 		for (let b = 0; b < 4 && t + b * beat < durationSec; b++) {
 			const bt = t + b * beat;
-			// DnB classic two-step kick pattern
-			if (b === 0) addBassDrum(p, bt, 0.4);
-			if (b === 2) addBassDrum(p, bt + sixteenth * 2, 0.35);
-			// snare on 2 and 4
-			if (b === 1 || b === 3) addSnare(p, bt, 0.25);
+			if (isBreakbar) {
+				// breakbeat variation: syncopated kick pattern
+				if (b === 0) addBassDrum(p, bt, 0.4);
+				if (b === 1) addBassDrum(p, bt + sixteenth * 3, 0.3);
+				if (b === 3) addBassDrum(p, bt + sixteenth, 0.35);
+				if (b === 1 || b === 3) addSnare(p, bt, 0.25);
+				if (b === 2) addSnare(p, bt + sixteenth * 2, 0.2);
+			} else {
+				// classic two-step
+				if (b === 0) addBassDrum(p, bt, 0.4);
+				if (b === 2) addBassDrum(p, bt + sixteenth * 2, 0.35);
+				if (b === 1 || b === 3) addSnare(p, bt, 0.25);
+			}
 			// rapid hi-hats
 			for (let s = 0; s < 4; s++) {
 				const ht = bt + s * sixteenth;
@@ -213,16 +287,19 @@ const generateDnb: StyleGenerator = (p, bpm, durationSec) => {
 					addHihat(p, ht, s % 2 === 0 ? 0.1 : 0.06);
 				}
 			}
-			// open hat for texture on off-beats
 			if (b % 2 === 1) addOpenHihat(p, bt + sixteenth * 3, 0.06);
 		}
+		barCount++;
 	}
 
-	// rolling bass line
-	const bassNotes = [NOTES.C2, NOTES.D2, NOTES.E2, NOTES.G2];
+	// aggressive rolling bass — more harmonics, faster movement
+	const bassNotes = [NOTES.C2, NOTES.D2, NOTES.E2, NOTES.G2, NOTES.F2, NOTES.D2];
 	let bassIdx = 0;
 	for (let t = 0; t < durationSec; t += beat * 0.5) {
-		addBassSynth(p, t, bassNotes[bassIdx % bassNotes.length], beat * 0.4, 0.16);
+		const freq = bassNotes[bassIdx % bassNotes.length];
+		addBassSynth(p, t, freq, beat * 0.4, 0.2);
+		// sub-bass layer for aggression
+		addSineAt(p, t, freq * 0.5, beat * 0.35, 0.08);
 		bassIdx++;
 	}
 
@@ -241,30 +318,37 @@ const generateChill: StyleGenerator = (p, bpm, durationSec) => {
 	for (let t = 0; t < durationSec; t += beat * 4) {
 		for (let b = 0; b < 4 && t + b * beat < durationSec; b++) {
 			const bt = t + b * beat;
-			// soft kick on 1 and 3
 			if (b === 0 || b === 2) addBassDrum(p, bt, 0.2);
-			// gentle snare / rim on 2 and 4
 			if (b === 1 || b === 3) addSnare(p, bt, 0.1);
-			// soft hi-hats
 			addHihat(p, bt, 0.05);
 			addHihat(p, bt + beat / 2, 0.03);
 		}
 	}
 
-	// warm bass pad
-	const chords = [
-		[NOTES.C2, NOTES.E2, NOTES.G2],
+	// pad synth — warm detuned chords for atmosphere
+	const padChords = [
+		[NOTES.C3, NOTES.E3, NOTES.G3],
 		[NOTES.A2, NOTES.C3, NOTES.E3],
 		[NOTES.F2, NOTES.A2, NOTES.C3],
 		[NOTES.G2, NOTES.Bb2, NOTES.D3],
 	];
-	let ci = 0;
-	for (let t = 0; t < durationSec; t += beat * 4) {
-		const chord = chords[ci % chords.length];
-		for (const note of chord) {
-			addBassSynth(p, t, note, beat * 3.5, 0.08);
-		}
-		ci++;
+	let pi = 0;
+	for (let t = 0; t < durationSec; t += beat * 8) {
+		addPadSynth(p, t, padChords[pi % padChords.length], beat * 7.5, 0.05);
+		pi++;
+	}
+
+	// melodic bass line — walks through chord tones
+	const bassLine = [
+		NOTES.C2, NOTES.E2, NOTES.G2, NOTES.E2,
+		NOTES.A2, NOTES.C3, NOTES.A2, NOTES.G2,
+		NOTES.F2, NOTES.A2, NOTES.C3, NOTES.A2,
+		NOTES.G2, NOTES.Bb2, NOTES.D3, NOTES.Bb2,
+	];
+	let bi = 0;
+	for (let t = 0; t < durationSec; t += beat) {
+		addBassSynth(p, t, bassLine[bi % bassLine.length], beat * 0.9, 0.1);
+		bi++;
 	}
 
 	// gentle lead melody
@@ -277,7 +361,7 @@ const generateChill: StyleGenerator = (p, bpm, durationSec) => {
 		mi++;
 	}
 
-	// ambient sine pad for warmth
+	// ambient sine pad for extra warmth
 	for (let t = 0; t < durationSec; t += beat * 8) {
 		addSineAt(p, t, NOTES.C4, beat * 7, 0.03);
 		addSineAt(p, t, NOTES.G3, beat * 7, 0.02);

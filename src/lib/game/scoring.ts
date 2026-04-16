@@ -25,6 +25,16 @@ export function applyJudgment(state: ScoreState, grade: JudgmentGrade): ScoreSta
 	};
 }
 
+/**
+ * Judge a hold note based on what fraction of its duration the player held.
+ * Returns the grade and applies combo/score like a regular note.
+ */
+export function judgeHold(heldRatio: number): JudgmentGrade {
+	if (heldRatio >= 0.9) return 'perfect';
+	if (heldRatio >= 0.6) return 'good';
+	return 'miss';
+}
+
 export function accuracy(state: ScoreState): number {
 	const total = state.perfects + state.goods + state.misses;
 	if (total === 0) return 1;
