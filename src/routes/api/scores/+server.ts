@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import { auth } from '$lib/server/auth.js';
 import { db } from '$lib/server/db/index.js';
-import { scores, playerProfiles, achievements } from '$lib/server/db/schema.js';
+import { scores, playerProfiles, achievements, replays } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { calculateXP, xpToLevel, checkAchievements } from '$lib/game/progression.js';
 import type { RequestHandler } from './$types.js';
@@ -11,7 +11,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (!session) throw error(401, 'Not authenticated');
 
 	const body = await request.json();
-	const { chartId, score, maxCombo, accuracy, playTimeMs, scoreState } = body;
+	const { chartId, score, maxCombo, accuracy, playTimeMs, scoreState, replayEvents } = body;
 
 	if (!chartId || typeof score !== 'number' || typeof maxCombo !== 'number' || typeof accuracy !== 'number') {
 		throw error(400, 'Invalid score data');
@@ -24,6 +24,16 @@ export const POST: RequestHandler = async ({ request }) => {
 		.insert(scores)
 		.values({ userId, chartId, score, maxCombo, accuracy })
 		.returning();
+
+	// Insert replay if events provided
+	let replayId: string | null = null;
+	if (Array.isArray(replayEvents) && replayEvents.length > 0) {
+		const [replayRow] = await db
+			.insert(replays)
+			.values({ userId, scoreId: row.id, chartId, events: replayEvents })
+			.returning({ id: replays.id });
+		replayId = replayRow.id;
+	}
 
 	// Calculate XP gained
 	const xpGained = calculateXP(score, accuracy, maxCombo);
@@ -94,6 +104,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			xpGained,
 			newLevel,
 			newAchievements,
+			replayId,
 		},
 		{ status: 201 },
 	);

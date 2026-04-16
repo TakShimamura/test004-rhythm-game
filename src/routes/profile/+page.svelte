@@ -19,6 +19,18 @@
 
 	type Achievement = { type: string; unlockedAt: string };
 
+	type ReplayEntry = {
+		replayId: string;
+		createdAt: string;
+		score: number;
+		accuracy: number;
+		maxCombo: number;
+		songTitle: string;
+		songArtist: string;
+		chartDifficulty: string;
+		chartId: string;
+	};
+
 	type HistoryEntry = {
 		id: string;
 		score: number;
@@ -33,6 +45,7 @@
 	let profile: Profile | null = $state(null);
 	let userAchievements: Achievement[] = $state([]);
 	let history: HistoryEntry[] = $state([]);
+	let recentReplays: ReplayEntry[] = $state([]);
 	let loading = $state(true);
 	let viewingOther = $state(false);
 	let otherUserName = $state('');
@@ -73,9 +86,10 @@
 
 		viewedUserId = $session.data.user.id;
 
-		const [profileRes, historyRes] = await Promise.all([
+		const [profileRes, historyRes, replaysRes] = await Promise.all([
 			fetch('/api/profile'),
 			fetch('/api/profile/history'),
+			fetch('/api/profile/replays'),
 		]);
 
 		if (profileRes.ok) {
@@ -86,6 +100,10 @@
 
 		if (historyRes.ok) {
 			history = await historyRes.json();
+		}
+
+		if (replaysRes.ok) {
+			recentReplays = await replaysRes.json();
 		}
 
 		loading = false;
@@ -301,6 +319,29 @@
 							<div class="history-accuracy">{(entry.accuracy * 100).toFixed(1)}%</div>
 							<div class="history-grade" style="color: {gradeColor(g)}">{g}</div>
 							<div class="history-date">{new Date(entry.playedAt).toLocaleDateString()}</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
+			<!-- Replays -->
+			<h2 class="section-title">SAVED REPLAYS</h2>
+			{#if recentReplays.length === 0}
+				<p class="no-data">No saved replays yet.</p>
+			{:else}
+				<div class="history-list">
+					{#each recentReplays as replay}
+						{@const g = grade(replay.accuracy)}
+						<div class="history-item">
+							<div class="history-song">
+								<span class="song-title">{replay.songTitle}</span>
+								<span class="song-artist">{replay.songArtist}</span>
+							</div>
+							<div class="history-difficulty">{replay.chartDifficulty.toUpperCase()}</div>
+							<div class="history-score">{replay.score.toLocaleString()}</div>
+							<div class="history-accuracy">{(replay.accuracy * 100).toFixed(1)}%</div>
+							<div class="history-grade" style="color: {gradeColor(g)}">{g}</div>
+							<a href="/replay/{replay.replayId}" class="replay-watch-link">WATCH</a>
 						</div>
 					{/each}
 				</div>
@@ -624,6 +665,20 @@
 		color: #555;
 		font-size: 11px;
 		text-align: right;
+	}
+
+	.replay-watch-link {
+		color: #ff8844;
+		text-decoration: none;
+		font-size: 12px;
+		letter-spacing: 1px;
+		text-align: right;
+		transition: color 0.2s;
+	}
+
+	.replay-watch-link:hover {
+		color: #ffaa66;
+		text-decoration: underline;
 	}
 
 	@media (max-width: 768px) {

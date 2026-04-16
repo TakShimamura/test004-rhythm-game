@@ -29,6 +29,13 @@
       "when": 1776313789944,
       "tag": "0003_tiny_george_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776315459672,
+      "tag": "0004_magenta_beyonder",
+      "breakpoints": true
     }
   ]
 }

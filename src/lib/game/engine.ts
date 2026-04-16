@@ -1,4 +1,4 @@
-import type { Chart, GameConfig, GameState, GameModeConfig, JudgmentGrade, Lane, ScoreState } from './types.js';
+import type { Chart, GameConfig, GameState, GameModeConfig, JudgmentGrade, Lane, ScoreState, ReplayEvent, ReplayData } from './types.js';
 import { DEFAULT_CONFIG, DEFAULT_MODE_CONFIG, emptyScore } from './types.js';
 import { createInputHandler, type InputHandler } from './input.js';
 import { createGameAudio, generateBackingTrack, playHitSound, playMissSound, playComboMilestone, playFullComboSound, type GameAudio } from './audio.js';
@@ -6,6 +6,7 @@ import { createRenderer, type JudgmentFlash, type Renderer } from './renderer.js
 import { applyJudgment, judge, judgeHold } from './scoring.js';
 import { applyMirror } from './modes.js';
 import { createEndlessManager } from './endless.js';
+import { createGhostOverlay, type GhostState } from './ghost.js';
 
 export type Engine = {
 	start: () => void;
@@ -18,6 +19,8 @@ export type Engine = {
 	getModeConfig: () => GameModeConfig;
 	/** For practice mode: ms delta of last hit (null if none yet) */
 	getLastDeltaMs: () => number | null;
+	/** Get recorded replay data after game ends */
+	getReplayData: () => ReplayData;
 };
 
 export type EngineCallbacks = {
@@ -31,6 +34,7 @@ export function createEngine(
 	config: GameConfig = DEFAULT_CONFIG,
 	callbacks: EngineCallbacks = {},
 	modeConfig: GameModeConfig = DEFAULT_MODE_CONFIG,
+	ghostReplay?: ReplayData,
 ): Engine {
 	let state: GameState = 'waiting';
 	let score = emptyScore();
@@ -38,6 +42,7 @@ export function createEngine(
 	let hitNotes = new Set<number>();
 	let flashes: JudgmentFlash[] = [];
 	let lastDeltaMs: number | null = null;
+	let replayEvents: ReplayEvent[] = [];
 
 	// Apply mirror mode at chart load time
 	const playNotes = modeConfig.mirror ? applyMirror(chart.notes) : [...chart.notes];
@@ -63,6 +68,12 @@ export function createEngine(
 	const audio: GameAudio = createGameAudio();
 	const input: InputHandler = createInputHandler(effectiveConfig);
 	const renderer: Renderer = createRenderer({ canvas, chart: playChart, config: effectiveConfig });
+
+	// Ghost overlay (optional)
+	const ghostUpdate = ghostReplay
+		? createGhostOverlay(playChart, ghostReplay, effectiveConfig)
+		: null;
+	let ghostState: GhostState | null = null;
 
 	let trackSource: AudioBufferSourceNode | null = null;
 
@@ -98,9 +109,30 @@ export function createEngine(
 		}
 	}
 
+	// Track which lanes were pressed last frame for replay up-event detection
+	let prevLanesPressed = new Set<Lane>();
+
 	function processInput(currentTime: number) {
 		const notes = playChart.notes;
 		const events = input.poll();
+
+		// Record replay down events
+		for (const event of events) {
+			const audioT = event.time - (performance.now() / 1000 - audio.currentTime());
+			replayEvents.push({ t: audioT, type: 'down', lane: event.lane });
+		}
+
+		// Detect lane releases for replay up events
+		for (const lane of prevLanesPressed) {
+			if (!input.lanePressed(lane)) {
+				replayEvents.push({ t: currentTime, type: 'up', lane });
+			}
+		}
+		prevLanesPressed = new Set<Lane>();
+		for (const l of [0, 1, 2] as Lane[]) {
+			if (input.lanePressed(l)) prevLanesPressed.add(l);
+		}
+
 		for (const event of events) {
 			const audioTime = event.time - (performance.now() / 1000 - audio.currentTime());
 			let bestIdx = -1;
@@ -215,12 +247,18 @@ export function createEngine(
 
 		processInput(currentTime);
 
+		// Update ghost overlay
+		if (ghostUpdate) {
+			ghostState = ghostUpdate(currentTime);
+		}
+
 		renderer.draw(
 			currentTime,
 			score,
 			(lane: Lane) => input.lanePressed(lane),
 			hitNotes,
 			flashes,
+			ghostState ?? undefined,
 		);
 
 		// Endless mode never ends on its own — only manual quit
@@ -312,6 +350,8 @@ export function createEngine(
 			flashes = [];
 			activeHolds = new Map();
 			lastDeltaMs = null;
+			replayEvents = [];
+			prevLanesPressed = new Set<Lane>();
 			setScore(score);
 
 			// Restart
@@ -338,6 +378,17 @@ export function createEngine(
 		},
 		getLastDeltaMs() {
 			return lastDeltaMs;
+		},
+		getReplayData(): ReplayData {
+			const total = score.perfects + score.goods + score.misses;
+			const acc = total === 0 ? 1 : (score.perfects + score.goods * 0.5) / total;
+			return {
+				chartId: chart.id,
+				events: [...replayEvents],
+				finalScore: score.score,
+				finalAccuracy: acc,
+				recordedAt: new Date().toISOString(),
+			};
 		},
 	};
 }

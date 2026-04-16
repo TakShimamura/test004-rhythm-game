@@ -100,6 +100,15 @@ export const collectionItems = pgTable('collection_items', {
 	addedAt: timestamp('added_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const replays = pgTable('replays', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	userId: text('user_id').references(() => user.id).notNull(),
+	scoreId: uuid('score_id').references(() => scores.id).notNull(),
+	chartId: uuid('chart_id').references(() => charts.id).notNull(),
+	events: jsonb('events').notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const featuredCharts = pgTable('featured_charts', {
 	id: uuid('id').defaultRandom().primaryKey(),
 	chartId: uuid('chart_id').references(() => charts.id).notNull(),

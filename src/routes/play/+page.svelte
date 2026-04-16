@@ -27,6 +27,13 @@
 	let animatingScore = $state(false);
 	let lastDeltaMs: number | null = $state(null);
 
+	// Replay state
+	let replaySaved = $state(false);
+	let replayId: string | null = $state(null);
+	let replayLinkCopied = $state(false);
+	let savingReplay = $state(false);
+	let lastScoreId: string | null = null;
+
 	// Mode config state
 	let speedMultiplier = $state(1.0);
 	let mirrorEnabled = $state(false);
@@ -106,7 +113,8 @@
 	async function submitScore(chartId: string, s: ScoreState) {
 		if (!$session.data || scoreSubmitted) return;
 		scoreSubmitted = true;
-		await fetch('/api/scores', {
+
+		const res = await fetch('/api/scores', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
@@ -116,7 +124,51 @@
 				accuracy: accuracy(s),
 			}),
 		});
+
+		if (res.ok) {
+			const data = await res.json();
+			// Store the scoreId for potential replay save later
+			lastScoreId = data.id;
+		}
+
 		await loadLeaderboard(chartId);
+	}
+
+	async function handleSaveReplay() {
+		if (!$session.data || !engine || savingReplay || replaySaved) return;
+
+		savingReplay = true;
+		const rd = engine.getReplayData();
+
+		// Submit a new score entry with replay events attached
+		const res = await fetch('/api/scores', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				chartId: activeChartId,
+				score: score.score,
+				maxCombo: score.maxCombo,
+				accuracy: accuracy(score),
+				replayEvents: rd.events,
+			}),
+		});
+
+		if (res.ok) {
+			const data = await res.json();
+			if (data.replayId) {
+				replayId = data.replayId;
+				replaySaved = true;
+			}
+		}
+		savingReplay = false;
+	}
+
+	function handleCopyReplayLink() {
+		if (!replayId) return;
+		const url = `${window.location.origin}/replay/${replayId}`;
+		navigator.clipboard.writeText(url);
+		replayLinkCopied = true;
+		setTimeout(() => { replayLinkCopied = false; }, 2000);
 	}
 
 	async function loadLeaderboard(chartId: string) {
@@ -141,6 +193,9 @@
 		score = { score: 0, combo: 0, maxCombo: 0, perfects: 0, goods: 0, misses: 0 };
 		displayScore = 0;
 		scoreSubmitted = false;
+		replaySaved = false;
+		replayId = null;
+		replayLinkCopied = false;
 		gameState = 'waiting';
 
 		const settings = loadSettings();
@@ -450,6 +505,22 @@
 			<div class="results-actions">
 				<a href="/play" class="start-btn glow-btn">PLAY AGAIN</a>
 				<button class="share-btn" onclick={handleShare}>SHARE</button>
+				{#if $session.data}
+					{#if replaySaved}
+						<span class="replay-saved-msg">Replay saved!</span>
+						<button class="replay-link-btn" onclick={handleCopyReplayLink}>
+							{replayLinkCopied ? 'COPIED!' : 'COPY LINK'}
+						</button>
+					{:else}
+						<button
+							class="save-replay-btn"
+							onclick={handleSaveReplay}
+							disabled={savingReplay}
+						>
+							{savingReplay ? 'SAVING...' : 'SAVE REPLAY'}
+						</button>
+					{/if}
+				{/if}
 			</div>
 
 			{#if showShareCard}
@@ -728,6 +799,50 @@
 
 	.share-btn:hover {
 		background: #aa88ff20;
+	}
+
+	.save-replay-btn {
+		font-family: monospace;
+		font-size: 14px;
+		padding: 12px 24px;
+		background: transparent;
+		border: 2px solid #ff8844;
+		color: #ff8844;
+		cursor: pointer;
+		letter-spacing: 2px;
+		transition: background 0.2s;
+	}
+
+	.save-replay-btn:hover {
+		background: #ff884420;
+	}
+
+	.save-replay-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.replay-saved-msg {
+		font-family: monospace;
+		font-size: 13px;
+		color: #44ff66;
+		letter-spacing: 1px;
+	}
+
+	.replay-link-btn {
+		font-family: monospace;
+		font-size: 12px;
+		padding: 8px 16px;
+		background: transparent;
+		border: 1px solid #44ff66;
+		color: #44ff66;
+		cursor: pointer;
+		letter-spacing: 1px;
+		transition: background 0.2s;
+	}
+
+	.replay-link-btn:hover {
+		background: #44ff6620;
 	}
 
 	.share-card-container {

@@ -98,3 +98,17 @@ export const DEFAULT_MODE_CONFIG: GameModeConfig = {
 	noFail: false,
 	practice: false,
 };
+
+export type ReplayEvent = {
+	t: number;       // seconds from song start
+	type: 'down' | 'up';
+	lane: Lane;
+};
+
+export type ReplayData = {
+	chartId: string;
+	events: ReplayEvent[];
+	finalScore: number;
+	finalAccuracy: number;
+	recordedAt: string;  // ISO date
+};

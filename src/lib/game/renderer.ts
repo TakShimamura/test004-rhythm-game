@@ -67,6 +67,12 @@ export type JudgmentFlash = {
 	time: number;
 };
 
+export type GhostDrawState = {
+	score: { score: number; combo: number; maxCombo: number; perfects: number; goods: number; misses: number };
+	hitNotes: Set<number>;
+	lanesPressed: Set<Lane>;
+};
+
 export type Renderer = {
 	resize: () => void;
 	draw: (
@@ -75,6 +81,7 @@ export type Renderer = {
 		lanePressed: (lane: Lane) => boolean,
 		hitNotes: Set<number>,
 		flashes: JudgmentFlash[],
+		ghost?: GhostDrawState,
 	) => void;
 	spawnParticles: (lane: Lane, grade: JudgmentGrade) => void;
 	/** Burst particles along a hold note bar when released/completed. */
@@ -1286,6 +1293,7 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		lanePressed: (lane: Lane) => boolean,
 		hitNotes: Set<number>,
 		flashes: JudgmentFlash[],
+		ghost?: GhostDrawState,
 	) {
 		const now = performance.now() / 1000;
 		const dt = Math.min(now - lastDrawTime, 0.05);
@@ -1644,6 +1652,11 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			ctx.restore();
 		}
 
+		// Ghost overlay
+		if (ghost) {
+			drawGhostOverlay(ghost, hitZoneY);
+		}
+
 		// Full combo golden flash overlay
 		drawFullComboFlash(now);
 
@@ -1651,6 +1664,32 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		if (shake.sx !== 0 || shake.sy !== 0) {
 			ctx.restore();
 		}
+	}
+
+	function drawGhostOverlay(ghost: GhostDrawState, hitZoneY: number) {
+		// Draw ghost lane press indicators
+		for (const lane of ghost.lanesPressed) {
+			const cx = (lane + 0.5) * laneWidth;
+			ctx.save();
+			ctx.globalAlpha = 0.25;
+			ctx.beginPath();
+			ctx.arc(cx, hitZoneY, 18, 0, Math.PI * 2);
+			ctx.fillStyle = '#88ccff';
+			ctx.fill();
+			ctx.restore();
+		}
+
+		// Draw ghost score/combo in top-right
+		ctx.save();
+		ctx.globalAlpha = 0.6;
+		ctx.font = 'bold 13px monospace';
+		ctx.textAlign = 'right';
+		ctx.fillStyle = '#88ccff';
+		ctx.fillText(`GHOST: ${ghost.score.score}`, w - 12, 60);
+		ctx.font = '11px monospace';
+		ctx.fillStyle = '#88ccff';
+		ctx.fillText(`${ghost.score.combo}x combo`, w - 12, 76);
+		ctx.restore();
 	}
 
 	return { resize, draw, spawnParticles, spawnHoldBurstParticles, triggerShake, triggerFullCombo, setAnalyser };
