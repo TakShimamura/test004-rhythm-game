@@ -31,15 +31,90 @@ export function createGameAudio(): GameAudio {
 }
 
 export function playHitSound(ctx: AudioContext, grade: 'perfect' | 'good') {
+	const now = ctx.currentTime;
+	if (grade === 'perfect') {
+		// Bright "ping" with harmonic overtones (two sines in harmony)
+		const osc1 = ctx.createOscillator();
+		const osc2 = ctx.createOscillator();
+		const gain = ctx.createGain();
+		osc1.connect(gain);
+		osc2.connect(gain);
+		gain.connect(ctx.destination);
+		osc1.frequency.value = 880;
+		osc2.frequency.value = 1320; // perfect fifth above
+		gain.gain.value = 0.12;
+		gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+		osc1.start(now);
+		osc2.start(now);
+		osc1.stop(now + 0.12);
+		osc2.stop(now + 0.12);
+	} else {
+		// Softer single tone for "good"
+		const osc = ctx.createOscillator();
+		const gain = ctx.createGain();
+		osc.connect(gain);
+		gain.connect(ctx.destination);
+		osc.frequency.value = 440;
+		gain.gain.value = 0.1;
+		gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+		osc.start(now);
+		osc.stop(now + 0.08);
+	}
+}
+
+export function playMissSound(ctx: AudioContext) {
+	const now = ctx.currentTime;
 	const osc = ctx.createOscillator();
 	const gain = ctx.createGain();
+	osc.type = 'square';
 	osc.connect(gain);
 	gain.connect(ctx.destination);
-	osc.frequency.value = grade === 'perfect' ? 880 : 440;
-	gain.gain.value = 0.15;
-	gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
-	osc.start(ctx.currentTime);
-	osc.stop(ctx.currentTime + 0.1);
+	osc.frequency.value = 100;
+	gain.gain.value = 0.06;
+	gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+	osc.start(now);
+	osc.stop(now + 0.05);
+}
+
+export function playComboMilestone(ctx: AudioContext, combo: number) {
+	// Rising chime: 3 quick ascending tones
+	const now = ctx.currentTime;
+	const baseFreq = combo >= 100 ? 660 : combo >= 50 ? 550 : 440;
+	const intervals = [0, 0.06, 0.12];
+	const freqs = [baseFreq, baseFreq * 1.25, baseFreq * 1.5]; // major intervals
+
+	for (let i = 0; i < 3; i++) {
+		const osc = ctx.createOscillator();
+		const gain = ctx.createGain();
+		osc.connect(gain);
+		gain.connect(ctx.destination);
+		osc.frequency.value = freqs[i];
+		gain.gain.setValueAtTime(0.001, now + intervals[i]);
+		gain.gain.exponentialRampToValueAtTime(0.12, now + intervals[i] + 0.01);
+		gain.gain.exponentialRampToValueAtTime(0.001, now + intervals[i] + 0.15);
+		osc.start(now + intervals[i]);
+		osc.stop(now + intervals[i] + 0.15);
+	}
+}
+
+export function playFullComboSound(ctx: AudioContext) {
+	// Triumphant major triad held for 0.5s
+	const now = ctx.currentTime;
+	const triad = [523.25, 659.25, 783.99]; // C5, E5, G5
+
+	for (const freq of triad) {
+		const osc = ctx.createOscillator();
+		const gain = ctx.createGain();
+		osc.connect(gain);
+		gain.connect(ctx.destination);
+		osc.frequency.value = freq;
+		gain.gain.setValueAtTime(0.001, now);
+		gain.gain.exponentialRampToValueAtTime(0.1, now + 0.05);
+		gain.gain.setValueAtTime(0.1, now + 0.35);
+		gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+		osc.start(now);
+		osc.stop(now + 0.5);
+	}
 }
 
 // ---------------------------------------------------------------------------

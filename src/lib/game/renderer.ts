@@ -1,4 +1,4 @@
-import type { Chart, GameConfig, Lane, MusicStyle, ScoreState, JudgmentGrade } from './types.js';
+import type { Chart, GameConfig, Lane, MusicStyle, NoteSkin, ScoreState, JudgmentGrade } from './types.js';
 
 const LANE_COLORS = ['#ff4466', '#44ff66', '#4488ff'] as const;
 const LANE_GLOW_COLORS = ['rgba(255,68,102,', 'rgba(68,255,102,', 'rgba(68,136,255,'] as const;
@@ -74,6 +74,10 @@ export type Renderer = {
 	spawnParticles: (lane: Lane, grade: JudgmentGrade) => void;
 	/** Burst particles along a hold note bar when released/completed. */
 	spawnHoldBurstParticles: (lane: Lane, yStart: number, yEnd: number) => void;
+	/** Trigger screen shake on miss */
+	triggerShake: () => void;
+	/** Trigger full combo celebration */
+	triggerFullCombo: () => void;
 };
 
 export function createRenderer({ canvas, chart, config }: RendererOptions): Renderer {
@@ -87,6 +91,20 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 	const laneFlashes: LaneFlash[] = [];
 	let lastDrawTime = performance.now() / 1000;
 	let lastShootingStarTime = 0;
+
+	// Screen shake state
+	let shakeIntensity = 0;
+	let shakeStartTime = 0;
+	const SHAKE_DURATION = 0.2; // 200ms
+	const SHAKE_MIN = 4;
+	const SHAKE_MAX = 8;
+
+	// Full combo celebration state
+	let fullComboActive = false;
+	let fullComboStartTime = 0;
+	const FULL_COMBO_FLASH_DURATION = 0.4;
+
+	const noteSkin: NoteSkin = config.noteSkin ?? 'classic';
 
 	const beatDuration = 60 / chart.bpm;
 	const theme = chart.style ? STYLE_THEMES[chart.style] : DEFAULT_THEME;
@@ -193,6 +211,182 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 				color: `hsl(${hue}, 100%, ${60 + Math.random() * 20}%)`,
 				size: 2 + Math.random() * 3,
 			});
+		}
+	}
+
+	// ----- Shake helpers -----
+	function triggerShake() {
+		shakeIntensity = SHAKE_MIN + Math.random() * (SHAKE_MAX - SHAKE_MIN);
+		shakeStartTime = performance.now() / 1000;
+	}
+
+	function getShakeOffset(now: number): { sx: number; sy: number } {
+		const elapsed = now - shakeStartTime;
+		if (elapsed > SHAKE_DURATION || shakeIntensity === 0) return { sx: 0, sy: 0 };
+		const decay = 1 - elapsed / SHAKE_DURATION;
+		const mag = shakeIntensity * decay;
+		return {
+			sx: (Math.random() * 2 - 1) * mag,
+			sy: (Math.random() * 2 - 1) * mag,
+		};
+	}
+
+	// ----- Full combo celebration -----
+	function triggerFullCombo() {
+		fullComboActive = true;
+		fullComboStartTime = performance.now() / 1000;
+		// Massive particle explosion: 120+ particles in all lane colors
+		const hitZoneY = h * HIT_ZONE_Y_RATIO;
+		const cx = w / 2;
+		for (let i = 0; i < 120; i++) {
+			const angle = (Math.PI * 2 * i) / 120 + Math.random() * 0.3;
+			const speed = 150 + Math.random() * 400;
+			const color = LANE_COLORS[i % 3];
+			particles.push({
+				x: cx,
+				y: hitZoneY * 0.5,
+				vx: Math.cos(angle) * speed,
+				vy: Math.sin(angle) * speed - 100,
+				life: 0.8 + Math.random() * 0.6,
+				maxLife: 0.8 + Math.random() * 0.6,
+				color,
+				size: 3 + Math.random() * 5,
+				trail: true,
+			});
+		}
+		// Gold sparkles
+		for (let i = 0; i < 40; i++) {
+			const angle = Math.random() * Math.PI * 2;
+			const speed = 50 + Math.random() * 200;
+			particles.push({
+				x: cx + (Math.random() - 0.5) * w * 0.5,
+				y: h * 0.4 + (Math.random() - 0.5) * h * 0.3,
+				vx: Math.cos(angle) * speed,
+				vy: Math.sin(angle) * speed - 50,
+				life: 1.0 + Math.random() * 0.5,
+				maxLife: 1.0 + Math.random() * 0.5,
+				color: '#ffdd00',
+				size: 2 + Math.random() * 4,
+				trail: true,
+			});
+		}
+	}
+
+	function drawFullComboFlash(now: number) {
+		if (!fullComboActive) return;
+		const elapsed = now - fullComboStartTime;
+		if (elapsed > FULL_COMBO_FLASH_DURATION) {
+			fullComboActive = false;
+			return;
+		}
+		const alpha = 0.4 * (1 - elapsed / FULL_COMBO_FLASH_DURATION);
+		ctx.save();
+		ctx.fillStyle = `rgba(255, 221, 0, ${alpha})`;
+		ctx.fillRect(0, 0, w, h);
+		ctx.restore();
+	}
+
+	// ----- Streak fire (combo > 50) -----
+	function drawStreakFire(dt: number, combo: number, beatPulse: number) {
+		if (combo <= 50) return;
+		const hitZoneY = h * HIT_ZONE_Y_RATIO;
+		const intensity = Math.min(1, (combo - 50) / 50); // 0 at 50, 1 at 100+
+		const topH = getHighwayXAtY(0);
+		const botH = getHighwayXAtY(hitZoneY);
+
+		// Fire particles trailing up from both sides
+		const fireCount = Math.floor(1 + intensity * 4);
+		for (let side = 0; side < 2; side++) {
+			for (let i = 0; i < fireCount; i++) {
+				const baseX = side === 0 ? botH.left : botH.right;
+				const yPos = hitZoneY - Math.random() * hitZoneY * 0.6;
+				// Color shifts with intensity: orange -> yellow -> white
+				let hue: number;
+				let lightness: number;
+				if (intensity < 0.5) {
+					hue = 20 + Math.random() * 20; // orange
+					lightness = 50 + Math.random() * 15;
+				} else if (intensity < 0.8) {
+					hue = 35 + Math.random() * 20; // yellow-orange
+					lightness = 55 + Math.random() * 20;
+				} else {
+					hue = 40 + Math.random() * 20; // yellow-white
+					lightness = 65 + Math.random() * 25;
+				}
+				particles.push({
+					x: baseX + (Math.random() - 0.5) * 20,
+					y: yPos,
+					vx: (side === 0 ? -1 : 1) * (10 + Math.random() * 30),
+					vy: -(40 + Math.random() * 80 * intensity),
+					life: 0.2 + Math.random() * 0.3,
+					maxLife: 0.2 + Math.random() * 0.3,
+					color: `hsl(${hue}, 100%, ${lightness}%)`,
+					size: 1.5 + Math.random() * 3 * intensity,
+				});
+			}
+		}
+
+		// Highway edge glow: orange/red on both sides
+		const glowAlpha = 0.05 + intensity * 0.15 + beatPulse * 0.05;
+		ctx.save();
+		// Left edge glow
+		const leftGrad = ctx.createLinearGradient(topH.left - 30, 0, topH.left + 40, 0);
+		leftGrad.addColorStop(0, 'transparent');
+		leftGrad.addColorStop(0.4, `rgba(255, 100, 20, ${glowAlpha})`);
+		leftGrad.addColorStop(1, 'transparent');
+		ctx.fillStyle = leftGrad;
+		ctx.fillRect(topH.left - 30, 0, 70, hitZoneY + 40);
+		// Right edge glow
+		const rightGrad = ctx.createLinearGradient(topH.right - 40, 0, topH.right + 30, 0);
+		rightGrad.addColorStop(0, 'transparent');
+		rightGrad.addColorStop(0.6, `rgba(255, 100, 20, ${glowAlpha})`);
+		rightGrad.addColorStop(1, 'transparent');
+		ctx.fillStyle = rightGrad;
+		ctx.fillRect(topH.right - 40, 0, 70, hitZoneY + 40);
+		ctx.restore();
+	}
+
+	// ----- Note skin drawing helpers -----
+	function drawNoteSkinShape(cx: number, cy: number, lane: Lane, radius: number) {
+		if (noteSkin === 'classic') {
+			drawNoteShape(cx, cy, lane, radius);
+		} else if (noteSkin === 'neon') {
+			// hollow outline, no fill -- just path
+			drawNoteShape(cx, cy, lane, radius);
+		} else {
+			// minimal: simple small dot
+			ctx.beginPath();
+			ctx.arc(cx, cy, radius * 0.5, 0, Math.PI * 2);
+		}
+	}
+
+	function applyNoteSkinFill(cx: number, cy: number, lane: Lane, radius: number, proximity: number) {
+		const color = LANE_COLORS[lane];
+		if (noteSkin === 'classic') {
+			const noteGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+			noteGrad.addColorStop(0, '#fff');
+			noteGrad.addColorStop(0.3, color);
+			noteGrad.addColorStop(1, color + 'aa');
+			ctx.fillStyle = noteGrad;
+			ctx.fill();
+			ctx.strokeStyle = `rgba(255,255,255, ${0.5 + proximity * 0.4})`;
+			ctx.lineWidth = 1.5;
+			ctx.stroke();
+		} else if (noteSkin === 'neon') {
+			// No fill, bright glow outline
+			ctx.strokeStyle = color;
+			ctx.lineWidth = 2.5;
+			ctx.shadowColor = color;
+			ctx.shadowBlur = 15 + proximity * 10;
+			ctx.stroke();
+			// Inner faint glow
+			ctx.strokeStyle = '#fff';
+			ctx.lineWidth = 0.8;
+			ctx.stroke();
+		} else {
+			// minimal: solid dot, no glow
+			ctx.fillStyle = color;
+			ctx.fill();
 		}
 	}
 
@@ -584,6 +778,13 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 
 		ctx.clearRect(0, 0, w, h);
 
+		// Apply screen shake
+		const shake = getShakeOffset(now);
+		if (shake.sx !== 0 || shake.sy !== 0) {
+			ctx.save();
+			ctx.translate(shake.sx, shake.sy);
+		}
+
 		// animated background (combo-reactive)
 		drawBackground(currentTime, score.combo, beatPulse);
 
@@ -596,6 +797,9 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 
 		// perspective highway with glowing dividers
 		drawPerspectiveHighway(beatPulse);
+
+		// streak fire when combo > 50
+		drawStreakFire(dt, score.combo, beatPulse);
 
 		// lane press glow (enhanced, perspective-aware)
 		for (let lane = 0; lane < 3; lane++) {
@@ -744,24 +948,14 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 
 			ctx.save();
 			ctx.shadowColor = LANE_COLORS[note.lane];
-			ctx.shadowBlur = 10 + proximity * 15 + beatPulse * 5;
+			ctx.shadowBlur = noteSkin === 'minimal' ? 0 : 10 + proximity * 15 + beatPulse * 5;
 
-			const noteGrad = ctx.createRadialGradient(cx, y, 0, cx, y, noteSize / 2);
-			noteGrad.addColorStop(0, '#fff');
-			noteGrad.addColorStop(0.3, LANE_COLORS[note.lane]);
-			noteGrad.addColorStop(1, LANE_COLORS[note.lane] + 'aa');
-
-			drawNoteShape(cx, y, note.lane, noteSize / 2);
-			ctx.fillStyle = noteGrad;
-			ctx.fill();
-
-			ctx.strokeStyle = `rgba(255,255,255, ${0.5 + proximity * 0.4})`;
-			ctx.lineWidth = 1.5;
-			ctx.stroke();
+			drawNoteSkinShape(cx, y, note.lane, noteSize / 2);
+			applyNoteSkinFill(cx, y, note.lane, noteSize / 2, proximity);
 			ctx.restore();
 
-			// additional halo for nearby notes
-			if (proximity > 0.3) {
+			// additional halo for nearby notes (skip for minimal)
+			if (proximity > 0.3 && noteSkin !== 'minimal') {
 				drawNoteShape(cx, y, note.lane, noteSize / 2 + 4 + proximity * 4);
 				ctx.strokeStyle = LANE_GLOW_COLORS[note.lane] + `${proximity * 0.2})`;
 				ctx.lineWidth = 1;
@@ -883,7 +1077,15 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			ctx.fill();
 			ctx.restore();
 		}
+
+		// Full combo golden flash overlay
+		drawFullComboFlash(now);
+
+		// Restore shake transform
+		if (shake.sx !== 0 || shake.sy !== 0) {
+			ctx.restore();
+		}
 	}
 
-	return { resize, draw, spawnParticles, spawnHoldBurstParticles };
+	return { resize, draw, spawnParticles, spawnHoldBurstParticles, triggerShake, triggerFullCombo };
 }

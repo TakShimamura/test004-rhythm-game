@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { loadSettings, saveSettings, type UserSettings } from '$lib/game/settings.js';
+	import type { NoteSkin } from '$lib/game/types.js';
 
 	let settings: UserSettings = $state({
 		laneKeys: ['a', 's', 'd'],
@@ -8,7 +9,15 @@
 		scrollSpeedPx: 600,
 		defaultSpeedMultiplier: 1.0,
 		defaultMirror: false,
+		noteSkin: 'classic' as NoteSkin,
 	});
+
+	const NOTE_SKINS: { value: NoteSkin; label: string; desc: string }[] = [
+		{ value: 'classic', label: 'Classic', desc: 'Circles, diamonds, and squares with gradient fills' },
+		{ value: 'neon', label: 'Neon', desc: 'Hollow outlines with bright glow, no fill' },
+		{ value: 'minimal', label: 'Minimal', desc: 'Simple small dots, very clean' },
+	];
+	const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.5, 2.0];
 
 	let listeningLane: number | null = $state(null);
 	let saved = $state(false);
@@ -46,6 +55,7 @@
 			scrollSpeedPx: 600,
 			defaultSpeedMultiplier: 1.0,
 			defaultMirror: false,
+			noteSkin: 'classic',
 		};
 		saveSettings(settings);
 		saved = true;
@@ -112,6 +122,51 @@
 			/>
 			<span class="value">{settings.scrollSpeedPx}px/s</span>
 		</div>
+	</section>
+
+	<section>
+		<h2>NOTE SKIN</h2>
+		<p class="desc">Change how notes look on the highway.</p>
+		<div class="skin-options">
+			{#each NOTE_SKINS as skin}
+				<button
+					class="skin-btn"
+					class:active={settings.noteSkin === skin.value}
+					onclick={() => { settings.noteSkin = skin.value; }}
+				>
+					<span class="skin-label">{skin.label}</span>
+					<span class="skin-desc">{skin.desc}</span>
+				</button>
+			{/each}
+		</div>
+	</section>
+
+	<section>
+		<h2>DEFAULT SPEED MULTIPLIER</h2>
+		<p class="desc">Pre-selected speed when starting a song.</p>
+		<div class="speed-buttons">
+			{#each SPEED_OPTIONS as spd}
+				<button
+					class="spd-btn"
+					class:active={settings.defaultSpeedMultiplier === spd}
+					onclick={() => { settings.defaultSpeedMultiplier = spd; }}
+				>
+					{spd}x
+				</button>
+			{/each}
+		</div>
+	</section>
+
+	<section>
+		<h2>DEFAULT MIRROR MODE</h2>
+		<p class="desc">Flip lanes by default when starting a song.</p>
+		<button
+			class="mirror-toggle"
+			class:active={settings.defaultMirror}
+			onclick={() => { settings.defaultMirror = !settings.defaultMirror; }}
+		>
+			{settings.defaultMirror ? 'ON' : 'OFF'}
+		</button>
 	</section>
 
 	<div class="actions">
@@ -260,4 +315,106 @@
 	}
 
 	.back-link:hover { color: #888; }
+
+	/* Note skin selector */
+	.skin-options {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.skin-btn {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 4px;
+		padding: 10px 14px;
+		background: transparent;
+		border: 1px solid #333;
+		color: #888;
+		cursor: pointer;
+		text-align: left;
+		font-family: monospace;
+		transition: all 0.15s;
+	}
+
+	.skin-btn:hover {
+		border-color: #4488ff;
+		color: #aaa;
+	}
+
+	.skin-btn.active {
+		border-color: #4488ff;
+		color: #4488ff;
+		background: rgba(68, 136, 255, 0.1);
+		box-shadow: 0 0 8px rgba(68, 136, 255, 0.15);
+	}
+
+	.skin-label {
+		font-size: 14px;
+		font-weight: bold;
+	}
+
+	.skin-desc {
+		font-size: 11px;
+		color: #666;
+	}
+
+	.skin-btn.active .skin-desc {
+		color: #88aacc;
+	}
+
+	/* Speed buttons */
+	.speed-buttons {
+		display: flex;
+		gap: 6px;
+	}
+
+	.spd-btn {
+		font-family: monospace;
+		font-size: 14px;
+		padding: 6px 14px;
+		background: transparent;
+		border: 1px solid #333;
+		color: #888;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+
+	.spd-btn:hover {
+		border-color: #4488ff;
+		color: #4488ff;
+	}
+
+	.spd-btn.active {
+		border-color: #4488ff;
+		color: #4488ff;
+		background: rgba(68, 136, 255, 0.15);
+		box-shadow: 0 0 8px rgba(68, 136, 255, 0.2);
+	}
+
+	/* Mirror toggle */
+	.mirror-toggle {
+		font-family: monospace;
+		font-size: 14px;
+		padding: 8px 24px;
+		background: transparent;
+		border: 1px solid #333;
+		color: #888;
+		cursor: pointer;
+		transition: all 0.15s;
+		letter-spacing: 2px;
+	}
+
+	.mirror-toggle:hover {
+		border-color: #666;
+		color: #aaa;
+	}
+
+	.mirror-toggle.active {
+		border-color: #ffdd00;
+		color: #ffdd00;
+		background: rgba(255, 221, 0, 0.1);
+		box-shadow: 0 0 8px rgba(255, 221, 0, 0.15);
+	}
 </style>

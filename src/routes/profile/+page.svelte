@@ -2,6 +2,7 @@
 	import { authClient } from '$lib/auth-client.js';
 	import { ACHIEVEMENT_DEFS, xpForNextLevel } from '$lib/game/progression.js';
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 
 	const session = authClient.useSession();
 
@@ -30,9 +31,43 @@
 	let userAchievements: Achievement[] = $state([]);
 	let history: HistoryEntry[] = $state([]);
 	let loading = $state(true);
+	let viewingOther = $state(false);
+	let otherUserName = $state('');
+	let otherUserImage: string | null = $state(null);
+	let isFollowing = $state(false);
+	let followLoading = $state(false);
+	let viewedUserId = $state('');
 
 	onMount(async () => {
-		if (!$session.data) return;
+		const targetUserId = page.url.searchParams.get('user');
+
+		if (targetUserId && targetUserId !== $session.data?.user.id) {
+			// Viewing another user's profile
+			viewingOther = true;
+			viewedUserId = targetUserId;
+
+			const profileRes = await fetch(`/api/profile/${targetUserId}`);
+			if (profileRes.ok) {
+				const data = await profileRes.json();
+				profile = data.profile;
+				userAchievements = data.achievements;
+				otherUserName = data.user.name;
+				otherUserImage = data.user.image;
+			}
+
+			// Check follow status
+			if ($session.data) {
+				await checkFollowStatus(targetUserId);
+			}
+
+			loading = false;
+			return;
+		}
+
+		// Viewing own profile
+		if (!$session.data) { loading = false; return; }
+
+		viewedUserId = $session.data.user.id;
 
 		const [profileRes, historyRes] = await Promise.all([
 			fetch('/api/profile'),
@@ -51,6 +86,31 @@
 
 		loading = false;
 	});
+
+	async function checkFollowStatus(targetId: string): Promise<void> {
+		const res = await fetch(`/api/follows?userId=${targetId}`);
+		if (res.ok) {
+			const data = await res.json();
+			isFollowing = data.following;
+		}
+	}
+
+	async function toggleFollow(): Promise<void> {
+		if (!$session.data || !viewedUserId) return;
+		followLoading = true;
+
+		const method = isFollowing ? 'DELETE' : 'POST';
+		const res = await fetch('/api/follows', {
+			method,
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ followingId: viewedUserId }),
+		});
+
+		if (res.ok) {
+			isFollowing = !isFollowing;
+		}
+		followLoading = false;
+	}
 
 	function xpProgress(xp: number, level: number): number {
 		const prevThreshold = (level - 1) * (level - 1) * 100;
@@ -97,10 +157,11 @@
 		return Math.max(...history.map((h) => h.maxCombo));
 	}
 
+	const displayName = $derived(viewingOther ? otherUserName : ($session.data?.user.name ?? ''));
 	const unlockedSet = $derived(new Set(userAchievements.map((a) => a.type)));
 </script>
 
-{#if !$session.data}
+{#if !viewingOther && !$session.data}
 	<div class="profile-page">
 		<div class="center-msg">
 			<p>You must be logged in to view your profile.</p>
@@ -113,11 +174,21 @@
 	</div>
 {:else if profile}
 	<div class="profile-page">
-		<a href="/" class="back-link">← BACK</a>
+		<a href="/" class="back-link">&larr; BACK</a>
 
 		<div class="profile-header">
-			<h1 class="player-name">{$session.data.user.name}</h1>
+			<h1 class="player-name">{displayName}</h1>
 			<div class="level-badge">LV. {profile.level}</div>
+			{#if viewingOther && $session.data}
+				<button
+					class="follow-btn"
+					class:following={isFollowing}
+					onclick={toggleFollow}
+					disabled={followLoading}
+				>
+					{isFollowing ? 'UNFOLLOW' : 'FOLLOW'}
+				</button>
+			{/if}
 		</div>
 
 		<!-- XP Bar -->
@@ -141,14 +212,16 @@
 				<div class="stat-value">{formatTime(profile.totalPlayTimeMs)}</div>
 				<div class="stat-label">Play Time</div>
 			</div>
-			<div class="stat-card">
-				<div class="stat-value">{(avgAccuracy() * 100).toFixed(1)}%</div>
-				<div class="stat-label">Avg Accuracy</div>
-			</div>
-			<div class="stat-card">
-				<div class="stat-value">{bestCombo()}</div>
-				<div class="stat-label">Best Combo</div>
-			</div>
+			{#if !viewingOther}
+				<div class="stat-card">
+					<div class="stat-value">{(avgAccuracy() * 100).toFixed(1)}%</div>
+					<div class="stat-label">Avg Accuracy</div>
+				</div>
+				<div class="stat-card">
+					<div class="stat-value">{bestCombo()}</div>
+					<div class="stat-label">Best Combo</div>
+				</div>
+			{/if}
 		</div>
 
 		<!-- Achievements -->
@@ -166,28 +239,34 @@
 			{/each}
 		</div>
 
-		<!-- Play History -->
-		<h2 class="section-title">RECENT PLAYS</h2>
-		{#if history.length === 0}
-			<p class="no-data">No plays yet. Go play some songs!</p>
-		{:else}
-			<div class="history-list">
-				{#each history as entry}
-					{@const g = grade(entry.accuracy)}
-					<div class="history-item">
-						<div class="history-song">
-							<span class="song-title">{entry.songTitle}</span>
-							<span class="song-artist">{entry.songArtist}</span>
+		<!-- Play History (own profile only) -->
+		{#if !viewingOther}
+			<h2 class="section-title">RECENT PLAYS</h2>
+			{#if history.length === 0}
+				<p class="no-data">No plays yet. Go play some songs!</p>
+			{:else}
+				<div class="history-list">
+					{#each history as entry}
+						{@const g = grade(entry.accuracy)}
+						<div class="history-item">
+							<div class="history-song">
+								<span class="song-title">{entry.songTitle}</span>
+								<span class="song-artist">{entry.songArtist}</span>
+							</div>
+							<div class="history-difficulty">{entry.chartDifficulty.toUpperCase()}</div>
+							<div class="history-score">{entry.score.toLocaleString()}</div>
+							<div class="history-accuracy">{(entry.accuracy * 100).toFixed(1)}%</div>
+							<div class="history-grade" style="color: {gradeColor(g)}">{g}</div>
+							<div class="history-date">{new Date(entry.playedAt).toLocaleDateString()}</div>
 						</div>
-						<div class="history-difficulty">{entry.chartDifficulty.toUpperCase()}</div>
-						<div class="history-score">{entry.score.toLocaleString()}</div>
-						<div class="history-accuracy">{(entry.accuracy * 100).toFixed(1)}%</div>
-						<div class="history-grade" style="color: {gradeColor(g)}">{g}</div>
-						<div class="history-date">{new Date(entry.playedAt).toLocaleDateString()}</div>
-					</div>
-				{/each}
-			</div>
+					{/each}
+				</div>
+			{/if}
 		{/if}
+	</div>
+{:else if viewingOther}
+	<div class="profile-page">
+		<div class="center-msg"><p>Player not found.</p></div>
 	</div>
 {/if}
 
@@ -256,6 +335,36 @@
 		padding: 4px 12px;
 		font-size: 14px;
 		letter-spacing: 2px;
+	}
+
+	.follow-btn {
+		font-family: monospace;
+		font-size: 12px;
+		padding: 6px 16px;
+		background: transparent;
+		border: 1px solid #4488ff;
+		color: #4488ff;
+		cursor: pointer;
+		letter-spacing: 1px;
+		transition: background 0.2s;
+	}
+
+	.follow-btn:hover {
+		background: #4488ff20;
+	}
+
+	.follow-btn.following {
+		border-color: #ff4466;
+		color: #ff4466;
+	}
+
+	.follow-btn.following:hover {
+		background: #ff446620;
+	}
+
+	.follow-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	/* XP Bar */

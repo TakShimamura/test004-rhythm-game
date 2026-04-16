@@ -1,7 +1,41 @@
 <script lang="ts">
 	import { authClient } from '$lib/auth-client.js';
+	import { onMount } from 'svelte';
 
 	const session = authClient.useSession();
+
+	type DailyChallenge = {
+		date: string;
+		chartId: string;
+		difficulty: string;
+		songTitle: string;
+		songArtist: string;
+		bpm: number;
+	};
+
+	type DailyScore = {
+		playerName: string;
+		score: number;
+		accuracy: number;
+	};
+
+	let daily: DailyChallenge | null = $state(null);
+	let dailyTop: DailyScore[] = $state([]);
+
+	onMount(async () => {
+		const [challengeRes, lbRes] = await Promise.all([
+			fetch('/api/daily-challenge'),
+			fetch('/api/daily-challenge/leaderboard'),
+		]);
+
+		if (challengeRes.ok) {
+			daily = await challengeRes.json();
+		}
+		if (lbRes.ok) {
+			const all = await lbRes.json();
+			dailyTop = all.slice(0, 3);
+		}
+	});
 </script>
 
 <div class="home">
@@ -15,8 +49,34 @@
 			<span class="key key-d">D</span>
 		</div>
 		<a href="/play" class="play-btn">PLAY DEMO</a>
+
+		{#if daily}
+			<div class="daily-widget">
+				<div class="daily-header">DAILY CHALLENGE</div>
+				<div class="daily-song">{daily.songTitle}</div>
+				<div class="daily-meta">
+					<span>{daily.difficulty.toUpperCase()}</span>
+					<span>{daily.bpm} BPM</span>
+				</div>
+				<a href="/play?chart={daily.chartId}&daily=true" class="daily-btn">PLAY DAILY</a>
+				{#if dailyTop.length > 0}
+					<div class="daily-top">
+						{#each dailyTop as entry, i}
+							<div class="daily-top-row">
+								<span class="daily-rank">#{i + 1}</span>
+								<span class="daily-name">{entry.playerName}</span>
+								<span class="daily-score">{entry.score.toLocaleString()}</span>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		{/if}
+
 		<div class="nav-links">
 			<a href="/songs" class="nav-link">SONGS</a>
+			<a href="/leaderboard" class="nav-link">LEADERBOARD</a>
+			<a href="/feed" class="nav-link">FEED</a>
 			<a href="/profile" class="nav-link">PROFILE</a>
 			<a href="/settings" class="nav-link">SETTINGS</a>
 			{#if $session.data}
@@ -237,4 +297,72 @@
 		font-size: 13px;
 		text-shadow: 0 0 8px rgba(68, 255, 102, 0.2);
 	}
+
+	/* Daily Challenge Widget */
+	.daily-widget {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8px;
+		margin-top: 12px;
+		padding: 16px 24px;
+		background: #111118;
+		border: 1px solid #ffdd0044;
+		max-width: 300px;
+		width: 100%;
+	}
+
+	.daily-header {
+		font-size: 11px;
+		letter-spacing: 3px;
+		color: #ffdd00;
+	}
+
+	.daily-song {
+		font-size: 16px;
+		color: #ddd;
+	}
+
+	.daily-meta {
+		display: flex;
+		gap: 12px;
+		font-size: 11px;
+		color: #666;
+	}
+
+	.daily-btn {
+		font-family: monospace;
+		font-size: 14px;
+		padding: 8px 24px;
+		background: transparent;
+		border: 1px solid #ffdd00;
+		color: #ffdd00;
+		text-decoration: none;
+		letter-spacing: 2px;
+		transition: background 0.2s;
+	}
+
+	.daily-btn:hover {
+		background: #ffdd0020;
+	}
+
+	.daily-top {
+		width: 100%;
+		margin-top: 4px;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.daily-top-row {
+		display: grid;
+		grid-template-columns: 30px 1fr auto;
+		font-size: 11px;
+		padding: 3px 0;
+		color: #888;
+	}
+
+	.daily-rank { color: #ffdd00; }
+	.daily-name { color: #aaa; }
+	.daily-score { color: #4488ff; }
 </style>

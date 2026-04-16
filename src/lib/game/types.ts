@@ -30,12 +30,15 @@ export type Judgment = {
 	deltaMs: number;
 };
 
+export type NoteSkin = 'classic' | 'neon' | 'minimal';
+
 export type GameConfig = {
 	perfectWindowMs: number;
 	goodWindowMs: number;
 	laneKeys: [string, string, string];
 	audioOffsetMs: number;
 	scrollSpeedPx: number;
+	noteSkin: NoteSkin;
 };
 
 export const DEFAULT_CONFIG: GameConfig = {
@@ -44,6 +47,7 @@ export const DEFAULT_CONFIG: GameConfig = {
 	laneKeys: ['a', 's', 'd'],
 	audioOffsetMs: 0,
 	scrollSpeedPx: 600,
+	noteSkin: 'classic',
 };
 
 export type ScoreState = {

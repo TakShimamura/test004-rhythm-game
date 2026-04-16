@@ -1,7 +1,7 @@
 import type { Chart, GameConfig, GameState, GameModeConfig, JudgmentGrade, Lane, ScoreState } from './types.js';
 import { DEFAULT_CONFIG, DEFAULT_MODE_CONFIG, emptyScore } from './types.js';
 import { createInputHandler, type InputHandler } from './input.js';
-import { createGameAudio, generateBackingTrack, playHitSound, type GameAudio } from './audio.js';
+import { createGameAudio, generateBackingTrack, playHitSound, playMissSound, playComboMilestone, playFullComboSound, type GameAudio } from './audio.js';
 import { createRenderer, type JudgmentFlash, type Renderer } from './renderer.js';
 import { applyJudgment, judge, judgeHold } from './scoring.js';
 import { applyMirror } from './modes.js';
@@ -88,6 +88,16 @@ export function createEngine(
 		return result;
 	}
 
+	const COMBO_MILESTONES = [25, 50, 100];
+	function checkComboMilestone(prevCombo: number, newCombo: number) {
+		for (const milestone of COMBO_MILESTONES) {
+			if (prevCombo < milestone && newCombo >= milestone) {
+				playComboMilestone(audio.ctx, milestone);
+				break;
+			}
+		}
+	}
+
 	function processInput(currentTime: number) {
 		const notes = playChart.notes;
 		const events = input.poll();
@@ -119,6 +129,7 @@ export function createEngine(
 					const grade = judge(bestDelta, effectiveConfig);
 					hitNotes.add(bestIdx);
 					lastDeltaMs = bestDelta;
+					const prevCombo = score.combo;
 					setScore(applyJudgmentWithMode(score, grade));
 
 					flashes.push({
@@ -130,6 +141,10 @@ export function createEngine(
 					renderer.spawnParticles(event.lane, grade);
 					if (grade !== 'miss') {
 						playHitSound(audio.ctx, grade);
+						checkComboMilestone(prevCombo, score.combo);
+					} else {
+						playMissSound(audio.ctx);
+						renderer.triggerShake();
 					}
 				}
 			}
@@ -149,6 +164,7 @@ export function createEngine(
 				const grade = judgeHold(heldRatio);
 				activeHolds.delete(noteIdx);
 				hitNotes.add(noteIdx);
+				const prevCombo = score.combo;
 				setScore(applyJudgmentWithMode(score, grade));
 
 				flashes.push({
@@ -160,6 +176,10 @@ export function createEngine(
 				renderer.spawnParticles(note.lane, grade);
 				if (grade !== 'miss') {
 					playHitSound(audio.ctx, grade);
+					checkComboMilestone(prevCombo, score.combo);
+				} else {
+					playMissSound(audio.ctx);
+					renderer.triggerShake();
 				}
 			}
 		}
@@ -177,6 +197,8 @@ export function createEngine(
 					lane: note.lane,
 					time: performance.now() / 1000,
 				});
+				playMissSound(audio.ctx);
+				renderer.triggerShake();
 			}
 		}
 	}
@@ -205,6 +227,12 @@ export function createEngine(
 		if (!endlessManager) {
 			const lastNote = playChart.notes[playChart.notes.length - 1];
 			if (lastNote && currentTime > lastNote.t + 2) {
+				// Check for full combo before transitioning
+				const totalNotes = playChart.notes.length;
+				if (score.misses === 0 && totalNotes > 0 && (score.perfects + score.goods) === totalNotes) {
+					renderer.triggerFullCombo();
+					playFullComboSound(audio.ctx);
+				}
 				setState('results');
 				input.stop();
 				return;

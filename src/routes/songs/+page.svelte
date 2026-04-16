@@ -13,9 +13,12 @@
 		charts: SongChart[];
 	};
 
+	type ChartRating = { average: number | null; count: number };
+
 	let songs: Song[] = $state([]);
 	let loading = $state(true);
 	let search = $state('');
+	let ratings: Record<string, ChartRating> = $state({});
 	const session = authClient.useSession();
 
 	onMount(async () => {
@@ -30,8 +33,24 @@
 			}),
 		);
 		songs = detailed.filter(Boolean);
+
+		// Fetch ratings for all charts
+		const allCharts = songs.flatMap((s) => s.charts);
+		const ratingResults = await Promise.all(
+			allCharts.map(async (c) => {
+				const res = await fetch(`/api/charts/${c.id}/rating`);
+				if (!res.ok) return null;
+				const data = await res.json();
+				return { id: c.id, ...data };
+			}),
+		);
+		for (const r of ratingResults) {
+			if (r) ratings[r.id] = { average: r.average, count: r.count };
+		}
+
 		loading = false;
 	});
+
 
 	let filtered = $derived(
 		search
@@ -77,7 +96,14 @@
 					</div>
 					<div class="chart-links">
 						{#each song.charts as chart}
-							<a href="/play?chart={chart.id}" class="chart-link">{chart.difficulty}</a>
+							<a href="/play?chart={chart.id}" class="chart-link">
+								{chart.difficulty}
+								{#if ratings[chart.id]?.average !== undefined && ratings[chart.id]?.average !== null}
+									<span class="chart-rating" title="{ratings[chart.id].average?.toFixed(1)} ({ratings[chart.id].count} ratings)">
+										{ratings[chart.id].average?.toFixed(1)} &#9733;
+									</span>
+								{/if}
+							</a>
 						{/each}
 						{#if $session.data}
 							<a href="/editor/new?songId={song.id}" class="chart-link editor-link">+ chart</a>
@@ -236,4 +262,10 @@
 	}
 
 	.back-link:hover { color: #888; }
+
+	.chart-rating {
+		color: #ffdd00;
+		font-size: 10px;
+		margin-left: 4px;
+	}
 </style>

@@ -302,7 +302,11 @@
 	{#if gameState === 'results'}
 		{@const acc = accuracy(score)}
 		{@const grade = getGrade(acc)}
+		{@const isFullCombo = score.misses === 0 && (score.perfects + score.goods) > 0}
 		<div class="overlay results scale-in">
+			{#if isFullCombo}
+				<div class="full-combo-banner">FULL COMBO!</div>
+			{/if}
 			<div class="grade-display" style="--grade-color: {grade.color}">
 				<span class="grade-letter">{grade.letter}</span>
 			</div>
@@ -797,5 +801,35 @@
 		font-family: monospace;
 		font-size: 10px;
 		color: #555;
+	}
+
+	/* Full combo banner */
+	.full-combo-banner {
+		font-family: monospace;
+		font-size: 32px;
+		font-weight: bold;
+		letter-spacing: 6px;
+		color: #ffdd00;
+		text-shadow:
+			0 0 10px rgba(255, 221, 0, 0.8),
+			0 0 30px rgba(255, 221, 0, 0.4),
+			0 0 60px rgba(255, 221, 0, 0.2);
+		animation: fullComboAnim 1.5s ease-in-out infinite;
+	}
+
+	@keyframes fullComboAnim {
+		0%, 100% {
+			transform: scale(1);
+			text-shadow:
+				0 0 10px rgba(255, 221, 0, 0.8),
+				0 0 30px rgba(255, 221, 0, 0.4);
+		}
+		50% {
+			transform: scale(1.1);
+			text-shadow:
+				0 0 20px rgba(255, 221, 0, 1),
+				0 0 50px rgba(255, 221, 0, 0.6),
+				0 0 80px rgba(255, 221, 0, 0.3);
+		}
 	}
 </style>

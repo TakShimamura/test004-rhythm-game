@@ -1,4 +1,4 @@
-import type { GameConfig, GameModeConfig } from './types.js';
+import type { GameConfig, GameModeConfig, NoteSkin } from './types.js';
 import { DEFAULT_CONFIG, DEFAULT_MODE_CONFIG } from './types.js';
 
 const STORAGE_KEY = 'rhythm-game-settings';
@@ -9,6 +9,7 @@ export type UserSettings = {
 	scrollSpeedPx: number;
 	defaultSpeedMultiplier: number;
 	defaultMirror: boolean;
+	noteSkin: NoteSkin;
 };
 
 const DEFAULTS: UserSettings = {
@@ -17,6 +18,7 @@ const DEFAULTS: UserSettings = {
 	scrollSpeedPx: DEFAULT_CONFIG.scrollSpeedPx,
 	defaultSpeedMultiplier: DEFAULT_MODE_CONFIG.speedMultiplier,
 	defaultMirror: DEFAULT_MODE_CONFIG.mirror,
+	noteSkin: DEFAULT_CONFIG.noteSkin,
 };
 
 export function loadSettings(): UserSettings {
@@ -25,6 +27,7 @@ export function loadSettings(): UserSettings {
 		const raw = localStorage.getItem(STORAGE_KEY);
 		if (!raw) return { ...DEFAULTS };
 		const parsed = JSON.parse(raw);
+		const validSkins: NoteSkin[] = ['classic', 'neon', 'minimal'];
 		return {
 			laneKeys: Array.isArray(parsed.laneKeys) && parsed.laneKeys.length === 3
 				? parsed.laneKeys
@@ -41,6 +44,9 @@ export function loadSettings(): UserSettings {
 			defaultMirror: typeof parsed.defaultMirror === 'boolean'
 				? parsed.defaultMirror
 				: DEFAULTS.defaultMirror,
+			noteSkin: validSkins.includes(parsed.noteSkin)
+				? parsed.noteSkin
+				: DEFAULTS.noteSkin,
 		};
 	} catch {
 		return { ...DEFAULTS };
@@ -58,6 +64,7 @@ export function settingsToConfig(settings: UserSettings): GameConfig {
 		laneKeys: settings.laneKeys,
 		audioOffsetMs: settings.audioOffsetMs,
 		scrollSpeedPx: settings.scrollSpeedPx,
+		noteSkin: settings.noteSkin,
 	};
 }
 

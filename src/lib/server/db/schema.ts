@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, real, timestamp, jsonb, bigint } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, real, timestamp, jsonb, bigint, primaryKey, unique } from 'drizzle-orm/pg-core';
 import { user } from './auth.schema.js';
 
 export { user };
@@ -48,6 +48,31 @@ export const scores = pgTable('scores', {
 	maxCombo: integer('max_combo').notNull(),
 	accuracy: real('accuracy').notNull(),
 	playedAt: timestamp('played_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const follows = pgTable('follows', {
+	followerId: text('follower_id').references(() => user.id).notNull(),
+	followingId: text('following_id').references(() => user.id).notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.followerId, table.followingId] }),
+]);
+
+export const chartRatings = pgTable('chart_ratings', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	userId: text('user_id').references(() => user.id).notNull(),
+	chartId: uuid('chart_id').references(() => charts.id).notNull(),
+	rating: integer('rating').notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+	unique('chart_ratings_user_chart').on(table.userId, table.chartId),
+]);
+
+export const dailyChallenges = pgTable('daily_challenges', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	chartId: uuid('chart_id').references(() => charts.id).notNull(),
+	date: text('date').notNull().unique(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export * from './auth.schema.js';
