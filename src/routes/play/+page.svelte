@@ -41,6 +41,8 @@
 	let replayLinkCopied = $state(false);
 	let savingReplay = $state(false);
 	let lastScoreId: string | null = null;
+	let coinsEarned = $state(0);
+	let showCoinAnim = $state(false);
 
 	// Mode config state
 	let speedMultiplier = $state(1.0);
@@ -177,6 +179,11 @@
 			const data = await res.json();
 			// Store the scoreId for potential replay save later
 			lastScoreId = data.id;
+			if (typeof data.coinsEarned === 'number' && data.coinsEarned > 0) {
+				coinsEarned = data.coinsEarned;
+				showCoinAnim = true;
+				setTimeout(() => { showCoinAnim = false; }, 3000);
+			}
 		}
 
 		await loadLeaderboard(chartId);
@@ -250,6 +257,8 @@
 		replaySaved = false;
 		replayId = null;
 		replayLinkCopied = false;
+		coinsEarned = 0;
+		showCoinAnim = false;
 		gameState = 'waiting';
 		currentHealth = 1;
 
@@ -629,6 +638,13 @@
 				<p class="hint"><a href="/auth" class="auth-hint">Sign in</a> to save scores</p>
 			{:else if scoreSubmitted}
 				<p class="hint score-saved">Score saved!</p>
+			{/if}
+
+			{#if showCoinAnim && coinsEarned > 0}
+				<div class="coins-earned">
+					<span class="coin-icon-anim">&#9733;</span>
+					<span class="coin-text">+{coinsEarned} coins</span>
+				</div>
 			{/if}
 
 			{#if leaderboard.length > 0}
@@ -1077,6 +1093,46 @@
 
 	.score-saved {
 		color: #44ff66 !important;
+	}
+
+	.coins-earned {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		animation: coinPop 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	@keyframes coinPop {
+		from {
+			opacity: 0;
+			transform: scale(0.5) translateY(10px);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1) translateY(0);
+		}
+	}
+
+	.coin-icon-anim {
+		font-size: 22px;
+		color: #ffdd00;
+		text-shadow: 0 0 10px rgba(255, 221, 0, 0.6);
+		animation: coinSpin 1s ease-in-out;
+	}
+
+	@keyframes coinSpin {
+		0% { transform: rotateY(0deg); }
+		50% { transform: rotateY(180deg); }
+		100% { transform: rotateY(360deg); }
+	}
+
+	.coin-text {
+		font-family: monospace;
+		font-size: 18px;
+		color: #ffdd00;
+		font-weight: bold;
+		letter-spacing: 2px;
+		text-shadow: 0 0 8px rgba(255, 221, 0, 0.4);
 	}
 
 	.leaderboard {

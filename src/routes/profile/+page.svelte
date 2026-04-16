@@ -15,6 +15,7 @@
 		level: number;
 		totalPlays: number;
 		totalPlayTimeMs: number;
+		balance: number;
 	};
 
 	type Achievement = { type: string; unlockedAt: string };
@@ -54,6 +55,7 @@
 	let followLoading = $state(false);
 	let viewedUserId = $state('');
 	let miniChartCanvas: HTMLCanvasElement | undefined = $state(undefined);
+	let loginStreak = $state(0);
 
 	onMount(async () => {
 		const targetUserId = page.url.searchParams.get('user');
@@ -105,6 +107,15 @@
 		if (replaysRes.ok) {
 			recentReplays = await replaysRes.json();
 		}
+
+		// Fetch login streak
+		try {
+			const streakRes = await fetch('/api/streak/check', { method: 'POST' });
+			if (streakRes.ok) {
+				const streakData = await streakRes.json();
+				loginStreak = streakData.currentStreak;
+			}
+		} catch { /* ignore */ }
 
 		loading = false;
 
@@ -269,6 +280,27 @@
 				</div>
 			{/if}
 		</div>
+
+		<!-- Economy info -->
+		{#if !viewingOther}
+			<div class="economy-row">
+				<div class="economy-card">
+					<span class="economy-icon coin-color">&#9733;</span>
+					<div class="economy-info">
+						<span class="economy-value">{profile.balance ?? 0}</span>
+						<span class="economy-label">COINS</span>
+					</div>
+				</div>
+				<div class="economy-card">
+					<span class="economy-icon streak-color">&#128293;</span>
+					<div class="economy-info">
+						<span class="economy-value">{loginStreak}</span>
+						<span class="economy-label">DAY STREAK</span>
+					</div>
+				</div>
+				<a href="/shop" class="shop-link">SHOP &rarr;</a>
+			</div>
+		{/if}
 
 		<!-- Stats link + mini chart -->
 		{#if !viewingOther}
@@ -505,6 +537,69 @@
 		color: #666;
 		letter-spacing: 1px;
 		text-transform: uppercase;
+	}
+
+	/* Economy row */
+	.economy-row {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		margin-top: 24px;
+	}
+
+	.economy-card {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		background: #111118;
+		border: 1px solid #222;
+		padding: 12px 16px;
+	}
+
+	.economy-icon {
+		font-size: 24px;
+	}
+
+	.coin-color {
+		color: #ffdd00;
+		text-shadow: 0 0 8px rgba(255, 221, 0, 0.4);
+	}
+
+	.streak-color {
+		color: #ff8844;
+	}
+
+	.economy-info {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.economy-value {
+		font-size: 20px;
+		color: #fff;
+		font-weight: bold;
+	}
+
+	.economy-label {
+		font-size: 10px;
+		color: #666;
+		letter-spacing: 1px;
+	}
+
+	.shop-link {
+		font-family: monospace;
+		font-size: 14px;
+		color: #4488ff;
+		text-decoration: none;
+		border: 1px solid #4488ff44;
+		padding: 12px 20px;
+		letter-spacing: 2px;
+		transition: background 0.2s, border-color 0.2s;
+	}
+
+	.shop-link:hover {
+		background: #4488ff20;
+		border-color: #4488ff;
 	}
 
 	/* Stats link section */

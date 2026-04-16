@@ -1,9 +1,10 @@
 import { json, error } from '@sveltejs/kit';
 import { auth } from '$lib/server/auth.js';
 import { db } from '$lib/server/db/index.js';
-import { scores, playerProfiles, achievements, replays } from '$lib/server/db/schema.js';
+import { scores, playerProfiles, achievements, replays, currencyTransactions } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { calculateXP, xpToLevel, checkAchievements } from '$lib/game/progression.js';
+import { calculateEarnings } from '$lib/game/currency.js';
 import type { RequestHandler } from './$types.js';
 
 export const POST: RequestHandler = async ({ request }) => {
@@ -49,6 +50,9 @@ export const POST: RequestHandler = async ({ request }) => {
 	let newTotalPlays: number;
 	let newPlayTime: number;
 
+	// Calculate coins earned
+	const coinsEarned = calculateEarnings(score, 0);
+
 	if (existing) {
 		newXP = existing.xp + xpGained;
 		newTotalPlays = existing.totalPlays + 1;
@@ -61,6 +65,7 @@ export const POST: RequestHandler = async ({ request }) => {
 				level: xpToLevel(newXP),
 				totalPlays: newTotalPlays,
 				totalPlayTimeMs: newPlayTime,
+				balance: existing.balance + coinsEarned,
 				updatedAt: new Date(),
 			})
 			.where(eq(playerProfiles.userId, userId));
@@ -75,8 +80,16 @@ export const POST: RequestHandler = async ({ request }) => {
 			level: xpToLevel(newXP),
 			totalPlays: newTotalPlays,
 			totalPlayTimeMs: newPlayTime,
+			balance: coinsEarned,
 		});
 	}
+
+	// Insert currency transaction
+	await db.insert(currencyTransactions).values({
+		userId,
+		amount: coinsEarned,
+		reason: 'play_complete',
+	});
 
 	const newLevel = xpToLevel(newXP);
 
@@ -105,6 +118,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			newLevel,
 			newAchievements,
 			replayId,
+			coinsEarned,
 		},
 		{ status: 201 },
 	);

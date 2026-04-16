@@ -34,6 +34,8 @@
 	let dailyTop: DailyScore[] = $state([]);
 	let featured: FeaturedChart[] = $state([]);
 	let showTutorialPrompt = $state(false);
+	let streakCount = $state(0);
+	let streakToast = $state('');
 
 	onMount(async () => {
 		// Start ambient menu music (uses singleton — persists across nav)
@@ -59,6 +61,25 @@
 			const all = await featuredRes.json();
 			featured = all.slice(0, 3);
 		}
+
+		// Check login streak
+		if ($session.data) {
+			try {
+				const streakRes = await fetch('/api/streak/check', { method: 'POST' });
+				if (streakRes.ok) {
+					const data = await streakRes.json();
+					streakCount = data.currentStreak;
+					if (data.coinsEarned > 0) {
+						if (data.bonusType === 'streak') {
+							streakToast = `+${data.coinsEarned} Streak Bonus! (${data.currentStreak} day streak)`;
+						} else {
+							streakToast = `+${data.coinsEarned} Daily Bonus!`;
+						}
+						setTimeout(() => { streakToast = ''; }, 4000);
+					}
+				}
+			} catch { /* ignore streak errors */ }
+		}
 	});
 
 	onDestroy(() => {
@@ -68,6 +89,9 @@
 
 <div class="home">
 	<div class="bg-grid"></div>
+	{#if streakToast}
+		<div class="streak-toast">{streakToast}</div>
+	{/if}
 	<div class="content">
 		<h1 class="title-glow">RHYTHM GAME</h1>
 		<p class="subtitle">A keyboard rhythm game</p>
@@ -131,7 +155,11 @@
 			<a href="/stats" class="nav-link">STATS</a>
 			<a href="/profile" class="nav-link">PROFILE</a>
 			<a href="/settings" class="nav-link">SETTINGS</a>
+			<a href="/shop" class="nav-link">SHOP</a>
 			{#if $session.data}
+				{#if streakCount > 0}
+					<span class="streak-badge">&#128293; {streakCount}</span>
+				{/if}
 				<span class="user-info">Signed in as {$session.data.user.name}</span>
 				<button class="nav-link" onclick={() => authClient.signOut().then(() => location.reload())}>LOGOUT</button>
 			{:else}
@@ -377,6 +405,36 @@
 		color: #44ff66;
 		font-size: 13px;
 		text-shadow: 0 0 8px rgba(68, 255, 102, 0.2);
+	}
+
+	.streak-badge {
+		font-family: monospace;
+		font-size: 14px;
+		color: #ff8844;
+		text-shadow: 0 0 8px rgba(255, 136, 68, 0.3);
+		letter-spacing: 1px;
+	}
+
+	.streak-toast {
+		position: fixed;
+		top: 24px;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 100;
+		background: #111118;
+		border: 1px solid #ffdd0044;
+		color: #ffdd00;
+		font-family: monospace;
+		font-size: 14px;
+		padding: 12px 24px;
+		letter-spacing: 1px;
+		text-shadow: 0 0 8px rgba(255, 221, 0, 0.3);
+		animation: toastSlide 0.4s ease-out;
+	}
+
+	@keyframes toastSlide {
+		from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+		to { opacity: 1; transform: translateX(-50%) translateY(0); }
 	}
 
 	/* Daily Challenge Widget */

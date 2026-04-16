@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { songs, charts } from '../src/lib/server/db/schema.js';
+import { songs, charts, shopItems } from '../src/lib/server/db/schema.js';
 
 // ---------------------------------------------------------------------------
 // Deterministic IDs (mirrored from src/lib/chart/songs.ts)
@@ -353,6 +353,41 @@ async function seed() {
 			console.log(`  + Chart: ${chart.difficulty} (chart ${chart.id.slice(-2)})`);
 		} else {
 			console.log(`  = Chart already exists: ${chart.difficulty} (chart ${chart.id.slice(-2)})`);
+		}
+	}
+
+	// ── Shop items ──
+	const shopItemDefs = [
+		// Themes
+		{ type: 'theme', itemId: 'space', name: 'Space', description: 'Deep space background with stars', price: 200 },
+		{ type: 'theme', itemId: 'ocean', name: 'Ocean', description: 'Deep blue ocean vibes', price: 200 },
+		{ type: 'theme', itemId: 'cyberpunk', name: 'Cyberpunk', description: 'Neon-lit city aesthetic', price: 300 },
+		{ type: 'theme', itemId: 'forest', name: 'Forest', description: 'Calm forest atmosphere', price: 200 },
+		// Skins
+		{ type: 'skin', itemId: 'neon', name: 'Neon', description: 'Bright neon note skins', price: 150 },
+		{ type: 'skin', itemId: 'minimal', name: 'Minimal', description: 'Clean minimal note style', price: 100 },
+		// Effects
+		{ type: 'effect', itemId: 'splash', name: 'Splash', description: 'Splash hit effect', price: 150 },
+		{ type: 'effect', itemId: 'lightning', name: 'Lightning', description: 'Electric lightning hits', price: 200 },
+		{ type: 'effect', itemId: 'pixel', name: 'Pixel', description: 'Retro pixel burst effect', price: 150 },
+		// Combo colors
+		{ type: 'combo_color', itemId: 'rainbow', name: 'Rainbow', description: 'Rainbow combo counter', price: 100 },
+		{ type: 'combo_color', itemId: 'fire', name: 'Fire', description: 'Fiery combo colors', price: 150 },
+		{ type: 'combo_color', itemId: 'ice', name: 'Ice', description: 'Cool ice-blue combo', price: 100 },
+	];
+
+	console.log(`Seeding ${shopItemDefs.length} shop items...`);
+	for (const item of shopItemDefs) {
+		const [inserted] = await db
+			.insert(shopItems)
+			.values(item)
+			.onConflictDoNothing()
+			.returning();
+
+		if (inserted) {
+			console.log(`  + Shop item: ${item.name} (${item.type})`);
+		} else {
+			console.log(`  = Shop item already exists: ${item.name}`);
 		}
 	}
 

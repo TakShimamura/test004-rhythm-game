@@ -67,6 +67,12 @@
 					<a href="/editor/auto?songId={uploadedSongId}" class="choice-btn auto">
 						AUTO-GENERATE CHART
 					</a>
+					<a href="/editor/import" class="choice-btn import">
+						IMPORT CHART FILE
+					</a>
+					<a href="/editor/batch?songId={uploadedSongId}" class="choice-btn batch">
+						BATCH GENERATE (EASY/NORMAL/HARD)
+					</a>
 				</div>
 			</div>
 		{:else}
@@ -255,4 +261,18 @@
 	}
 
 	.choice-btn.auto:hover { background: #ffaa2220; }
+
+	.choice-btn.import {
+		border: 2px solid #aa44ff;
+		color: #aa44ff;
+	}
+
+	.choice-btn.import:hover { background: #aa44ff20; }
+
+	.choice-btn.batch {
+		border: 2px solid #44ffdd;
+		color: #44ffdd;
+	}
+
+	.choice-btn.batch:hover { background: #44ffdd20; }
 </style>

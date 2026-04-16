@@ -9,7 +9,41 @@ export const playerProfiles = pgTable('player_profiles', {
 	level: integer('level').default(1).notNull(),
 	totalPlays: integer('total_plays').default(0).notNull(),
 	totalPlayTimeMs: bigint('total_play_time_ms', { mode: 'number' }).default(0).notNull(),
+	balance: integer('balance').default(0).notNull(),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const currencyTransactions = pgTable('currency_transactions', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	userId: text('user_id').references(() => user.id).notNull(),
+	amount: integer('amount').notNull(),
+	reason: text('reason').notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const shopItems = pgTable('shop_items', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	type: text('type').notNull(),
+	itemId: text('item_id').notNull().unique(),
+	name: text('name').notNull(),
+	description: text('description'),
+	price: integer('price').notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const userInventory = pgTable('user_inventory', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	userId: text('user_id').references(() => user.id).notNull(),
+	itemId: text('item_id').notNull(),
+	purchasedAt: timestamp('purchased_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const loginStreaks = pgTable('login_streaks', {
+	userId: text('user_id').primaryKey().references(() => user.id),
+	currentStreak: integer('current_streak').default(0).notNull(),
+	longestStreak: integer('longest_streak').default(0).notNull(),
+	lastLoginDate: text('last_login_date'),
 	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 

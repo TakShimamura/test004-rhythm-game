@@ -36,6 +36,13 @@
       "when": 1776315459672,
       "tag": "0004_magenta_beyonder",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776346061969,
+      "tag": "0005_abnormal_sersi",
+      "breakpoints": true
     }
   ]
 }
