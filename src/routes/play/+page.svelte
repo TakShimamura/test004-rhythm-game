@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { createEngine, type Engine } from '$lib/game/engine.js';
-	import { DEMO_CHART } from '$lib/chart/demo.js';
+	import { DEMO_CHART, ALL_CHARTS } from '$lib/chart/songs.js';
 	import { accuracy } from '$lib/game/scoring.js';
 	import { loadSettings, settingsToConfig } from '$lib/game/settings.js';
 	import { authClient } from '$lib/auth-client.js';
@@ -19,12 +19,53 @@
 	let activeChartId = $state('');
 	let scoreSubmitted = $state(false);
 	let leaderboard: { playerName: string; score: number; accuracy: number }[] = $state([]);
+	let displayScore = $state(0);
+	let animatingScore = $state(false);
 
 	const session = authClient.useSession();
+
+	function getGrade(acc: number): { letter: string; color: string } {
+		if (acc >= 0.95) return { letter: 'S', color: '#ffdd00' };
+		if (acc >= 0.85) return { letter: 'A', color: '#44ff66' };
+		if (acc >= 0.70) return { letter: 'B', color: '#4488ff' };
+		if (acc >= 0.50) return { letter: 'C', color: '#ff8844' };
+		return { letter: 'D', color: '#ff4444' };
+	}
+
+	function animateScore(target: number) {
+		if (animatingScore) return;
+		animatingScore = true;
+		const start = displayScore;
+		const duration = 1200;
+		const startTime = performance.now();
+		function tick() {
+			const elapsed = performance.now() - startTime;
+			const progress = Math.min(1, elapsed / duration);
+			const eased = 1 - Math.pow(1 - progress, 3);
+			displayScore = Math.round(start + (target - start) * eased);
+			if (progress < 1) {
+				requestAnimationFrame(tick);
+			} else {
+				displayScore = target;
+				animatingScore = false;
+			}
+		}
+		requestAnimationFrame(tick);
+	}
+
+	$effect(() => {
+		if (gameState === 'results') {
+			animateScore(score.score);
+		}
+	});
 
 	async function loadChart(): Promise<Chart> {
 		const chartId = page.url.searchParams.get('chart');
 		if (!chartId) return DEMO_CHART;
+
+		// Check built-in charts first (they carry style metadata)
+		const builtIn = ALL_CHARTS.find((c) => c.id === chartId);
+		if (builtIn) return builtIn;
 
 		const res = await fetch(`/api/charts/${chartId}`);
 		if (!res.ok) return DEMO_CHART;
@@ -108,19 +149,20 @@
 	<canvas bind:this={canvas} class="game-canvas"></canvas>
 
 	{#if loading}
-		<div class="overlay">
+		<div class="overlay fade-in">
+			<div class="spinner"></div>
 			<p class="subtitle">Loading chart...</p>
 		</div>
 	{:else if gameState === 'waiting'}
-		<div class="overlay">
-			<h1>RHYTHM GAME</h1>
+		<div class="overlay fade-in">
+			<h1 class="title-glow">RHYTHM GAME</h1>
 			<p class="subtitle">{chartTitle} — {chartBpm} BPM</p>
 			<div class="keys-hint">
-				<span class="key key-a">{laneKeys[0].toUpperCase()}</span>
-				<span class="key key-s">{laneKeys[1].toUpperCase()}</span>
-				<span class="key key-d">{laneKeys[2].toUpperCase()}</span>
+				<span class="key key-a pulse-key">{laneKeys[0].toUpperCase()}</span>
+				<span class="key key-s pulse-key" style="animation-delay: 0.15s">{laneKeys[1].toUpperCase()}</span>
+				<span class="key key-d pulse-key" style="animation-delay: 0.3s">{laneKeys[2].toUpperCase()}</span>
 			</div>
-			<button class="start-btn" onclick={handleStart}>
+			<button class="start-btn glow-btn" onclick={handleStart}>
 				PRESS TO START
 			</button>
 			<p class="hint">Hit the notes as they reach the circles</p>
@@ -128,19 +170,24 @@
 	{/if}
 
 	{#if gameState === 'paused'}
-		<div class="overlay">
-			<h2>PAUSED</h2>
+		<div class="overlay fade-in">
+			<h2 class="title-glow">PAUSED</h2>
 			<p class="hint">Press ESC to resume</p>
 		</div>
 	{/if}
 
 	{#if gameState === 'results'}
-		<div class="overlay results">
-			<h1>RESULTS</h1>
+		{@const acc = accuracy(score)}
+		{@const grade = getGrade(acc)}
+		<div class="overlay results scale-in">
+			<div class="grade-display" style="--grade-color: {grade.color}">
+				<span class="grade-letter">{grade.letter}</span>
+			</div>
+			<h1 class="title-glow">RESULTS</h1>
 			<div class="results-grid">
 				<div class="result-item">
 					<span class="result-label">Score</span>
-					<span class="result-value">{score.score}</span>
+					<span class="result-value score-animated">{displayScore}</span>
 				</div>
 				<div class="result-item">
 					<span class="result-label">Max Combo</span>
@@ -148,7 +195,7 @@
 				</div>
 				<div class="result-item">
 					<span class="result-label">Accuracy</span>
-					<span class="result-value">{(accuracy(score) * 100).toFixed(1)}%</span>
+					<span class="result-value">{(acc * 100).toFixed(1)}%</span>
 				</div>
 				<div class="result-item">
 					<span class="result-label perfect">Perfect</span>
@@ -185,7 +232,7 @@
 				</div>
 			{/if}
 
-			<a href="/play" class="start-btn">PLAY AGAIN</a>
+			<a href="/play" class="start-btn glow-btn">PLAY AGAIN</a>
 			<a href="/" class="back-link">Back to Home</a>
 		</div>
 	{/if}
@@ -213,9 +260,79 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		background: rgba(10, 10, 15, 0.9);
+		background: rgba(5, 5, 16, 0.92);
 		color: #fff;
 		gap: 16px;
+		backdrop-filter: blur(8px);
+	}
+
+	.fade-in {
+		animation: fadeIn 0.4s ease-out;
+	}
+
+	.scale-in {
+		animation: scaleIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	@keyframes fadeIn {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+
+	@keyframes scaleIn {
+		from {
+			opacity: 0;
+			transform: scale(0.9);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+
+	@keyframes titleGlow {
+		0%, 100% {
+			text-shadow:
+				0 0 10px rgba(68, 136, 255, 0.3),
+				0 0 30px rgba(68, 136, 255, 0.1);
+		}
+		50% {
+			text-shadow:
+				0 0 20px rgba(68, 136, 255, 0.6),
+				0 0 50px rgba(68, 136, 255, 0.2),
+				0 0 80px rgba(68, 136, 255, 0.1);
+		}
+	}
+
+	.title-glow {
+		animation: titleGlow 2.5s ease-in-out infinite;
+	}
+
+	@keyframes pulseKey {
+		0%, 100% {
+			transform: scale(1);
+			box-shadow: 0 0 0 0 transparent;
+		}
+		50% {
+			transform: scale(1.08);
+		}
+	}
+
+	.pulse-key {
+		animation: pulseKey 1.5s ease-in-out infinite;
+	}
+
+	@keyframes glowBtnPulse {
+		0%, 100% {
+			box-shadow: 0 0 8px rgba(68, 136, 255, 0.2);
+		}
+		50% {
+			box-shadow: 0 0 20px rgba(68, 136, 255, 0.4), 0 0 40px rgba(68, 136, 255, 0.1);
+		}
+	}
+
+	.glow-btn {
+		animation: glowBtnPulse 2s ease-in-out infinite;
 	}
 
 	h1 {
@@ -257,9 +374,9 @@
 		font-weight: bold;
 	}
 
-	.key-a { border-color: #ff4466; color: #ff4466; }
-	.key-s { border-color: #44ff66; color: #44ff66; }
-	.key-d { border-color: #4488ff; color: #4488ff; }
+	.key-a { border-color: #ff4466; color: #ff4466; box-shadow: 0 0 10px rgba(255, 68, 102, 0.2); }
+	.key-s { border-color: #44ff66; color: #44ff66; box-shadow: 0 0 10px rgba(68, 255, 102, 0.2); }
+	.key-d { border-color: #4488ff; color: #4488ff; box-shadow: 0 0 10px rgba(68, 136, 255, 0.2); }
 
 	.start-btn {
 		font-family: monospace;
@@ -271,17 +388,54 @@
 		cursor: pointer;
 		letter-spacing: 2px;
 		text-decoration: none;
-		transition: background 0.2s;
+		transition: background 0.2s, box-shadow 0.2s;
 	}
 
 	.start-btn:hover {
 		background: #4488ff20;
+		box-shadow: 0 0 30px rgba(68, 136, 255, 0.3);
 	}
 
 	.hint {
 		font-family: monospace;
 		color: #555;
 		font-size: 14px;
+	}
+
+	/* Grade display */
+	.grade-display {
+		position: relative;
+		margin-bottom: 8px;
+	}
+
+	.grade-letter {
+		font-family: monospace;
+		font-size: 96px;
+		font-weight: bold;
+		color: var(--grade-color);
+		text-shadow:
+			0 0 20px var(--grade-color),
+			0 0 40px var(--grade-color),
+			0 0 80px var(--grade-color);
+		animation: gradeAppear 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	@keyframes gradeAppear {
+		from {
+			opacity: 0;
+			transform: scale(2);
+			filter: blur(10px);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1);
+			filter: blur(0);
+		}
+	}
+
+	.score-animated {
+		color: #fff;
+		transition: color 0.1s;
 	}
 
 	.results-grid {
@@ -368,4 +522,17 @@
 	.lb-name { color: #ccc; flex: 1; }
 	.lb-score { color: #fff; font-weight: bold; }
 	.lb-acc { color: #888; width: 55px; text-align: right; }
+
+	.spinner {
+		width: 40px;
+		height: 40px;
+		border: 3px solid rgba(68, 136, 255, 0.2);
+		border-top-color: #4488ff;
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+	}
+
+	@keyframes spin {
+		to { transform: rotate(360deg); }
+	}
 </style>

@@ -1,7 +1,7 @@
 import type { Chart, GameConfig, GameState, Lane, ScoreState } from './types.js';
 import { DEFAULT_CONFIG, emptyScore } from './types.js';
 import { createInputHandler, type InputHandler } from './input.js';
-import { createGameAudio, generateMetronomeTrack, playHitSound, type GameAudio } from './audio.js';
+import { createGameAudio, generateBackingTrack, playHitSound, type GameAudio } from './audio.js';
 import { createRenderer, type JudgmentFlash, type Renderer } from './renderer.js';
 import { applyJudgment, judge } from './scoring.js';
 
@@ -146,7 +146,7 @@ export function createEngine(
 			setState('playing');
 			audio.start();
 
-			const buffer = generateMetronomeTrack(audio.ctx, chart.bpm, chart.notes[chart.notes.length - 1].t + 3);
+			const buffer = generateBackingTrack(audio.ctx, chart.bpm, chart.notes[chart.notes.length - 1].t + 3, chart.style);
 			trackSource = audio.ctx.createBufferSource();
 			trackSource.buffer = buffer;
 			trackSource.connect(audio.ctx.destination);

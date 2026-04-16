@@ -7,6 +7,8 @@ export type Note = {
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
+export type MusicStyle = 'electro' | 'dnb' | 'chill';
+
 export type Chart = {
 	id: string;
 	songId: string;
@@ -14,6 +16,7 @@ export type Chart = {
 	bpm: number;
 	offsetMs: number;
 	notes: Note[];
+	style?: MusicStyle;
 };
 
 export type JudgmentGrade = 'perfect' | 'good' | 'miss';
