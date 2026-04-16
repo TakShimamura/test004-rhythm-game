@@ -6,9 +6,12 @@
 	import { accuracy } from '$lib/game/scoring.js';
 	import { loadSettings, saveSettings, settingsToConfig } from '$lib/game/settings.js';
 	import { authClient } from '$lib/auth-client.js';
+	import { generateStatsCard, downloadStatsCard } from '$lib/game/stats-card.js';
 	import type { Chart, GameState, GameModeConfig, ScoreState } from '$lib/game/types.js';
 
 	let canvas: HTMLCanvasElement;
+	let shareCanvas: HTMLCanvasElement | undefined = $state(undefined);
+	let showShareCard = $state(false);
 	let engine: Engine | null = $state(null);
 	let gameState: GameState = $state('waiting');
 	let score: ScoreState = $state({ score: 0, combo: 0, maxCombo: 0, perfects: 0, goods: 0, misses: 0 });
@@ -242,6 +245,32 @@
 			engine?.restart();
 		}
 	}
+
+	function handleShare(): void {
+		showShareCard = true;
+		// Wait for canvas to bind, then render
+		requestAnimationFrame(() => {
+			if (!shareCanvas) return;
+			const acc = accuracy(score);
+			const grade = getGrade(acc);
+			generateStatsCard(shareCanvas, {
+				playerName: $session.data?.user.name ?? 'Player',
+				level: 1,
+				grade: grade.letter,
+				score: score.score,
+				accuracy: acc,
+				maxCombo: score.maxCombo,
+				songTitle: chartTitle,
+				difficulty: 'normal',
+			});
+		});
+	}
+
+	function handleDownloadCard(): void {
+		if (shareCanvas) {
+			downloadStatsCard(shareCanvas);
+		}
+	}
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -411,7 +440,18 @@
 				</div>
 			{/if}
 
-			<a href="/play" class="start-btn glow-btn">PLAY AGAIN</a>
+			<div class="results-actions">
+				<a href="/play" class="start-btn glow-btn">PLAY AGAIN</a>
+				<button class="share-btn" onclick={handleShare}>SHARE</button>
+			</div>
+
+			{#if showShareCard}
+				<div class="share-card-container">
+					<canvas bind:this={shareCanvas} width="480" height="320"></canvas>
+					<button class="download-btn" onclick={handleDownloadCard}>DOWNLOAD IMAGE</button>
+				</div>
+			{/if}
+
 			<a href="/" class="back-link">Back to Home</a>
 		</div>
 	{/if}
@@ -659,6 +699,56 @@
 		font-family: monospace;
 		font-size: 24px;
 		font-weight: bold;
+	}
+
+	.results-actions {
+		display: flex;
+		gap: 12px;
+		align-items: center;
+	}
+
+	.share-btn {
+		font-family: monospace;
+		font-size: 14px;
+		padding: 12px 24px;
+		background: transparent;
+		border: 2px solid #aa88ff;
+		color: #aa88ff;
+		cursor: pointer;
+		letter-spacing: 2px;
+		transition: background 0.2s;
+	}
+
+	.share-btn:hover {
+		background: #aa88ff20;
+	}
+
+	.share-card-container {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8px;
+		margin-top: 8px;
+	}
+
+	.share-card-container canvas {
+		border: 1px solid #333;
+	}
+
+	.download-btn {
+		font-family: monospace;
+		font-size: 12px;
+		padding: 8px 16px;
+		background: transparent;
+		border: 1px solid #44ff66;
+		color: #44ff66;
+		cursor: pointer;
+		letter-spacing: 1px;
+		transition: background 0.2s;
+	}
+
+	.download-btn:hover {
+		background: #44ff6620;
 	}
 
 	.back-link {

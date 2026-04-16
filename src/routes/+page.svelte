@@ -21,8 +21,12 @@
 
 	let daily: DailyChallenge | null = $state(null);
 	let dailyTop: DailyScore[] = $state([]);
+	let showTutorialPrompt = $state(false);
 
 	onMount(async () => {
+		const tutorialDone = localStorage.getItem('tutorial-completed');
+		showTutorialPrompt = !tutorialDone;
+
 		const [challengeRes, lbRes] = await Promise.all([
 			fetch('/api/daily-challenge'),
 			fetch('/api/daily-challenge/leaderboard'),
@@ -48,6 +52,9 @@
 			<span class="key key-s">S</span>
 			<span class="key key-d">D</span>
 		</div>
+		{#if showTutorialPrompt}
+			<a href="/tutorial" class="tutorial-btn">NEW? START TUTORIAL</a>
+		{/if}
 		<a href="/play" class="play-btn">PLAY DEMO</a>
 
 		{#if daily}
@@ -77,6 +84,7 @@
 			<a href="/songs" class="nav-link">SONGS</a>
 			<a href="/leaderboard" class="nav-link">LEADERBOARD</a>
 			<a href="/feed" class="nav-link">FEED</a>
+			<a href="/stats" class="nav-link">STATS</a>
 			<a href="/profile" class="nav-link">PROFILE</a>
 			<a href="/settings" class="nav-link">SETTINGS</a>
 			{#if $session.data}
@@ -264,6 +272,35 @@
 	.play-btn:hover {
 		background: #4488ff20;
 		box-shadow: 0 0 30px rgba(68, 136, 255, 0.4), 0 0 60px rgba(68, 136, 255, 0.15);
+		transform: scale(1.04);
+	}
+
+	@keyframes tutorialGlow {
+		0%, 100% {
+			box-shadow: 0 0 10px rgba(68, 255, 102, 0.2);
+		}
+		50% {
+			box-shadow: 0 0 24px rgba(68, 255, 102, 0.5), 0 0 50px rgba(68, 255, 102, 0.15);
+		}
+	}
+
+	.tutorial-btn {
+		font-family: monospace;
+		font-size: 18px;
+		padding: 14px 36px;
+		background: transparent;
+		border: 2px solid #44ff66;
+		color: #44ff66;
+		cursor: pointer;
+		letter-spacing: 3px;
+		text-decoration: none;
+		transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
+		animation: tutorialGlow 2s ease-in-out infinite;
+	}
+
+	.tutorial-btn:hover {
+		background: #44ff6620;
+		box-shadow: 0 0 30px rgba(68, 255, 102, 0.4), 0 0 60px rgba(68, 255, 102, 0.15);
 		transform: scale(1.04);
 	}
 

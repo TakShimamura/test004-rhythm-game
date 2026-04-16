@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { loadSettings, saveSettings, type UserSettings } from '$lib/game/settings.js';
+	import Tooltip from '$lib/components/Tooltip.svelte';
 	import type { NoteSkin, HighwayTheme, HitEffect, ComboColor } from '$lib/game/types.js';
 
 	let settings: UserSettings = $state({
@@ -100,7 +101,8 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="settings-page">
+<div class="settings-page" style="position: relative;">
+	<Tooltip key="settings-hint" text="Customize your controls and visuals" position="top" />
 	<h1>SETTINGS</h1>
 
 	<section>

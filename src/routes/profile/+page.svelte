@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { authClient } from '$lib/auth-client.js';
 	import { ACHIEVEMENT_DEFS, xpForNextLevel } from '$lib/game/progression.js';
-	import { onMount } from 'svelte';
+	import { drawLineChart } from '$lib/game/chart-renderer.js';
+	import type { LineDataPoint } from '$lib/game/chart-renderer.js';
+	import Tooltip from '$lib/components/Tooltip.svelte';
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 
 	const session = authClient.useSession();
@@ -37,6 +40,7 @@
 	let isFollowing = $state(false);
 	let followLoading = $state(false);
 	let viewedUserId = $state('');
+	let miniChartCanvas: HTMLCanvasElement | undefined = $state(undefined);
 
 	onMount(async () => {
 		const targetUserId = page.url.searchParams.get('user');
@@ -85,7 +89,30 @@
 		}
 
 		loading = false;
+
+		await tick();
+		renderMiniChart();
 	});
+
+	function renderMiniChart(): void {
+		if (!miniChartCanvas || history.length === 0) return;
+		const ctx = miniChartCanvas.getContext('2d');
+		if (!ctx) return;
+		const last10 = history.slice(0, 10).reverse();
+		const data: LineDataPoint[] = last10.map((h) => ({
+			label: '',
+			value: h.accuracy * 100,
+		}));
+		drawLineChart(ctx, data, {
+			width: 200,
+			height: 80,
+			color: '#4488ff',
+			showFill: true,
+			showDots: true,
+			yMin: 0,
+			yMax: 100,
+		});
+	}
 
 	async function checkFollowStatus(targetId: string): Promise<void> {
 		const res = await fetch(`/api/follows?userId=${targetId}`);
@@ -173,7 +200,8 @@
 		<div class="center-msg"><p>Loading...</p></div>
 	</div>
 {:else if profile}
-	<div class="profile-page">
+	<div class="profile-page" style="position: relative;">
+		<Tooltip key="profile-hint" text="Track your progress and achievements" position="top" />
 		<a href="/" class="back-link">&larr; BACK</a>
 
 		<div class="profile-header">
@@ -223,6 +251,21 @@
 				</div>
 			{/if}
 		</div>
+
+		<!-- Stats link + mini chart -->
+		{#if !viewingOther}
+			<div class="stats-link-section">
+				<div class="stats-link-row">
+					<a href="/stats" class="detailed-stats-link">VIEW DETAILED STATS &rarr;</a>
+				</div>
+				{#if history.length > 0}
+					<div class="mini-chart-wrapper">
+						<span class="mini-chart-label">Accuracy (last 10)</span>
+						<canvas bind:this={miniChartCanvas} width="200" height="80"></canvas>
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 		<!-- Achievements -->
 		<h2 class="section-title">ACHIEVEMENTS</h2>
@@ -421,6 +464,49 @@
 		color: #666;
 		letter-spacing: 1px;
 		text-transform: uppercase;
+	}
+
+	/* Stats link section */
+	.stats-link-section {
+		margin-top: 28px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		flex-wrap: wrap;
+	}
+
+	.stats-link-row {
+		display: flex;
+		align-items: center;
+	}
+
+	.detailed-stats-link {
+		color: #4488ff;
+		text-decoration: none;
+		font-size: 13px;
+		letter-spacing: 2px;
+		border: 1px solid #4488ff44;
+		padding: 8px 16px;
+		transition: background 0.2s, border-color 0.2s;
+	}
+
+	.detailed-stats-link:hover {
+		background: #4488ff20;
+		border-color: #4488ff;
+	}
+
+	.mini-chart-wrapper {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.mini-chart-label {
+		font-size: 10px;
+		color: #555;
+		letter-spacing: 1px;
 	}
 
 	/* Achievements */

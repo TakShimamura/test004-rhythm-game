@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { authClient } from '$lib/auth-client.js';
+	import Tooltip from '$lib/components/Tooltip.svelte';
 
 	type SongChart = { id: string; difficulty: string };
 	type Song = {
@@ -68,7 +69,8 @@
 	}
 </script>
 
-<div class="songs-page">
+<div class="songs-page" style="position: relative;">
+	<Tooltip key="songs-hint" text="Pick a song and difficulty to play!" position="top" />
 	<h1>SONGS</h1>
 
 	<div class="controls">
@@ -87,7 +89,7 @@
 			{#each filtered as song}
 				<div class="song-card">
 					<div class="song-info">
-						<span class="song-title">{song.title}</span>
+						<a href="/stats/song/{song.id}" class="song-title-link">{song.title}</a>
 						<span class="song-artist">{song.artist}</span>
 					</div>
 					<div class="song-meta">
@@ -232,9 +234,16 @@
 		gap: 2px;
 	}
 
-	.song-title {
+	.song-title-link {
 		font-size: 15px;
 		font-weight: bold;
+		color: #ddd;
+		text-decoration: none;
+		transition: color 0.2s;
+	}
+
+	.song-title-link:hover {
+		color: #4488ff;
 	}
 
 	.song-artist {
