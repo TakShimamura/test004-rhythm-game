@@ -6,6 +6,8 @@
 		laneKeys: ['a', 's', 'd'],
 		audioOffsetMs: 0,
 		scrollSpeedPx: 600,
+		defaultSpeedMultiplier: 1.0,
+		defaultMirror: false,
 	});
 
 	let listeningLane: number | null = $state(null);
@@ -42,6 +44,8 @@
 			laneKeys: ['a', 's', 'd'],
 			audioOffsetMs: 0,
 			scrollSpeedPx: 600,
+			defaultSpeedMultiplier: 1.0,
+			defaultMirror: false,
 		};
 		saveSettings(settings);
 		saved = true;

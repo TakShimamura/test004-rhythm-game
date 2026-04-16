@@ -39,8 +39,38 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 - [x] Save draft / publish chart
 - [x] Song select screen with search + difficulty filter
 
-## P6 — Stretch
-- [ ] Auto-chart: onset detection from uploaded audio, generate starter chart
-- [ ] Chart ratings / likes
-- [ ] Difficulty curves, multiple charts per song
-- [ ] Replay system (store input timeline, play back)
+## P6 — Advanced gameplay
+- [x] Hold notes (long press mechanic with duration scoring)
+- [x] Reactive backgrounds (style-themed, combo-reactive)
+- [x] Perspective highway, parallax starfield, shooting stars
+- [x] Per-lane note shapes (circle/diamond/square)
+- [x] 10 songs with synth instruments (pad, arp, bass, drums, lead)
+
+## P7 — Player profile + progression
+- [ ] Player profile page (stats, play history, accuracy trends)
+- [ ] XP system: earn XP per play, level up
+- [ ] Achievement badges (first S rank, 100 combo, all songs cleared, etc.)
+- [ ] Personal best tracking per chart with delta display
+- [ ] Play count + time played stats
+
+## P8 — Social + competitive
+- [ ] Global leaderboard page (all charts, top players)
+- [ ] Friend system (follow other players)
+- [ ] Activity feed (recent scores from followed players)
+- [ ] Chart comments / ratings (1-5 stars)
+- [ ] Daily challenge: random chart, one attempt, ranked
+
+## P9 — Gameplay modes
+- [ ] Practice mode: slow down speed, loop sections, auto-play visualization
+- [ ] Endless mode: procedurally generated chart that gets harder over time
+- [ ] Mirror mode: flip lanes L↔R
+- [ ] No-fail mode: can't die, for learning charts
+- [ ] Speed mods: 0.5x to 2.0x playback speed
+
+## P10 — Polish + juice
+- [ ] Screen shake on miss
+- [ ] Full-combo celebration (special animation + sound)
+- [ ] Streak fire: visual fire trail when combo > 50
+- [ ] Note skins (different visual themes)
+- [ ] Sound effects pack (different hit sounds per skin)
+- [ ] Dark/light theme toggle

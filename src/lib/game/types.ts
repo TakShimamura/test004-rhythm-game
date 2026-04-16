@@ -60,3 +60,21 @@ export function emptyScore(): ScoreState {
 }
 
 export type GameState = 'waiting' | 'playing' | 'paused' | 'results';
+
+export type GameMode = 'normal' | 'practice' | 'endless' | 'mirror' | 'nofail';
+
+export type GameModeConfig = {
+	mode: GameMode;
+	speedMultiplier: number; // 0.5 to 2.0
+	mirror: boolean; // flip lanes
+	noFail: boolean; // can't fail
+	practice: boolean; // practice features enabled
+};
+
+export const DEFAULT_MODE_CONFIG: GameModeConfig = {
+	mode: 'normal',
+	speedMultiplier: 1.0,
+	mirror: false,
+	noFail: false,
+	practice: false,
+};

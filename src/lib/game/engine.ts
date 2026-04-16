@@ -1,17 +1,23 @@
-import type { Chart, GameConfig, GameState, Lane, ScoreState } from './types.js';
-import { DEFAULT_CONFIG, emptyScore } from './types.js';
+import type { Chart, GameConfig, GameState, GameModeConfig, JudgmentGrade, Lane, ScoreState } from './types.js';
+import { DEFAULT_CONFIG, DEFAULT_MODE_CONFIG, emptyScore } from './types.js';
 import { createInputHandler, type InputHandler } from './input.js';
 import { createGameAudio, generateBackingTrack, playHitSound, type GameAudio } from './audio.js';
 import { createRenderer, type JudgmentFlash, type Renderer } from './renderer.js';
 import { applyJudgment, judge, judgeHold } from './scoring.js';
+import { applyMirror } from './modes.js';
+import { createEndlessManager } from './endless.js';
 
 export type Engine = {
 	start: () => void;
 	pause: () => void;
 	resume: () => void;
+	restart: () => void;
 	destroy: () => void;
 	getState: () => GameState;
 	getScore: () => ScoreState;
+	getModeConfig: () => GameModeConfig;
+	/** For practice mode: ms delta of last hit (null if none yet) */
+	getLastDeltaMs: () => number | null;
 };
 
 export type EngineCallbacks = {
@@ -24,19 +30,39 @@ export function createEngine(
 	chart: Chart,
 	config: GameConfig = DEFAULT_CONFIG,
 	callbacks: EngineCallbacks = {},
+	modeConfig: GameModeConfig = DEFAULT_MODE_CONFIG,
 ): Engine {
 	let state: GameState = 'waiting';
 	let score = emptyScore();
 	let rafId = 0;
-	const hitNotes = new Set<number>();
-	const flashes: JudgmentFlash[] = [];
+	let hitNotes = new Set<number>();
+	let flashes: JudgmentFlash[] = [];
+	let lastDeltaMs: number | null = null;
+
+	// Apply mirror mode at chart load time
+	const playNotes = modeConfig.mirror ? applyMirror(chart.notes) : [...chart.notes];
+	const playChart: Chart = { ...chart, notes: playNotes };
+
+	// Endless mode manager (null for non-endless)
+	const endlessManager = modeConfig.mode === 'endless'
+		? createEndlessManager(chart.bpm)
+		: null;
+	if (endlessManager) {
+		playChart.notes = endlessManager.notes;
+	}
+
+	// Apply speed multiplier to scroll speed (visual-only speed mod)
+	const effectiveConfig: GameConfig = {
+		...config,
+		scrollSpeedPx: config.scrollSpeedPx * modeConfig.speedMultiplier,
+	};
 
 	// Hold note tracking: noteIndex -> { startTime (audio clock when note was first hit) }
-	const activeHolds = new Map<number, { startTime: number }>();
+	let activeHolds = new Map<number, { startTime: number }>();
 
 	const audio: GameAudio = createGameAudio();
-	const input: InputHandler = createInputHandler(config);
-	const renderer: Renderer = createRenderer({ canvas, chart, config });
+	const input: InputHandler = createInputHandler(effectiveConfig);
+	const renderer: Renderer = createRenderer({ canvas, chart: playChart, config: effectiveConfig });
 
 	let trackSource: AudioBufferSourceNode | null = null;
 
@@ -52,16 +78,27 @@ export function createEngine(
 
 	const offsetSec = config.audioOffsetMs / 1000;
 
+	/** Apply judgment with no-fail support: misses count but combo doesn't reset. */
+	function applyJudgmentWithMode(s: ScoreState, grade: JudgmentGrade): ScoreState {
+		const result = applyJudgment(s, grade);
+		if (modeConfig.noFail && grade === 'miss') {
+			// Restore combo — misses still counted but combo preserved
+			return { ...result, combo: s.combo, maxCombo: Math.max(s.maxCombo, s.combo) };
+		}
+		return result;
+	}
+
 	function processInput(currentTime: number) {
+		const notes = playChart.notes;
 		const events = input.poll();
 		for (const event of events) {
 			const audioTime = event.time - (performance.now() / 1000 - audio.currentTime());
 			let bestIdx = -1;
 			let bestDelta = Infinity;
 
-			for (let i = 0; i < chart.notes.length; i++) {
+			for (let i = 0; i < notes.length; i++) {
 				if (hitNotes.has(i) || activeHolds.has(i)) continue;
-				const note = chart.notes[i];
+				const note = notes[i];
 				if (note.lane !== event.lane) continue;
 				const delta = (audioTime - note.t - offsetSec) * 1000;
 				if (Math.abs(delta) < Math.abs(bestDelta)) {
@@ -70,8 +107,8 @@ export function createEngine(
 				}
 			}
 
-			if (bestIdx >= 0 && Math.abs(bestDelta) <= config.goodWindowMs) {
-				const note = chart.notes[bestIdx];
+			if (bestIdx >= 0 && Math.abs(bestDelta) <= effectiveConfig.goodWindowMs) {
+				const note = notes[bestIdx];
 
 				if (note.duration && note.duration > 0) {
 					// Hold note: start tracking, don't score yet
@@ -79,9 +116,10 @@ export function createEngine(
 					playHitSound(audio.ctx, 'good');
 				} else {
 					// Regular tap note
-					const grade = judge(bestDelta, config);
+					const grade = judge(bestDelta, effectiveConfig);
 					hitNotes.add(bestIdx);
-					setScore(applyJudgment(score, grade));
+					lastDeltaMs = bestDelta;
+					setScore(applyJudgmentWithMode(score, grade));
 
 					flashes.push({
 						grade,
@@ -99,7 +137,7 @@ export function createEngine(
 
 		// Process active hold notes
 		for (const [noteIdx, hold] of activeHolds) {
-			const note = chart.notes[noteIdx];
+			const note = notes[noteIdx];
 			const duration = note.duration!;
 			const elapsed = currentTime - hold.startTime;
 			const isLaneHeld = input.lanePressed(note.lane);
@@ -111,7 +149,7 @@ export function createEngine(
 				const grade = judgeHold(heldRatio);
 				activeHolds.delete(noteIdx);
 				hitNotes.add(noteIdx);
-				setScore(applyJudgment(score, grade));
+				setScore(applyJudgmentWithMode(score, grade));
 
 				flashes.push({
 					grade,
@@ -127,13 +165,13 @@ export function createEngine(
 		}
 
 		// Check for missed notes (passed the hit zone by too much)
-		for (let i = 0; i < chart.notes.length; i++) {
+		for (let i = 0; i < notes.length; i++) {
 			if (hitNotes.has(i) || activeHolds.has(i)) continue;
-			const note = chart.notes[i];
+			const note = notes[i];
 			const delta = (currentTime - note.t - offsetSec) * 1000;
-			if (delta > config.goodWindowMs) {
+			if (delta > effectiveConfig.goodWindowMs) {
 				hitNotes.add(i);
-				setScore(applyJudgment(score, 'miss'));
+				setScore(applyJudgmentWithMode(score, 'miss'));
 				flashes.push({
 					grade: 'miss',
 					lane: note.lane,
@@ -147,6 +185,12 @@ export function createEngine(
 		if (state !== 'playing') return;
 		const currentTime = audio.currentTime();
 
+		// Endless mode: generate more notes as player progresses
+		if (endlessManager) {
+			endlessManager.update(currentTime);
+			playChart.notes = endlessManager.notes;
+		}
+
 		processInput(currentTime);
 
 		renderer.draw(
@@ -157,12 +201,14 @@ export function createEngine(
 			flashes,
 		);
 
-		// check if song ended
-		const lastNote = chart.notes[chart.notes.length - 1];
-		if (lastNote && currentTime > lastNote.t + 2) {
-			setState('results');
-			input.stop();
-			return;
+		// Endless mode never ends on its own — only manual quit
+		if (!endlessManager) {
+			const lastNote = playChart.notes[playChart.notes.length - 1];
+			if (lastNote && currentTime > lastNote.t + 2) {
+				setState('results');
+				input.stop();
+				return;
+			}
 		}
 
 		rafId = requestAnimationFrame(gameLoop);
@@ -181,20 +227,26 @@ export function createEngine(
 		flashes,
 	);
 
+	function startPlayback() {
+		audio.start();
+
+		const lastNote = playChart.notes[playChart.notes.length - 1];
+		const trackDuration = lastNote ? lastNote.t + 3 : 30;
+		const buffer = generateBackingTrack(audio.ctx, playChart.bpm, trackDuration, playChart.style);
+		trackSource = audio.ctx.createBufferSource();
+		trackSource.buffer = buffer;
+		trackSource.connect(audio.ctx.destination);
+		trackSource.start();
+
+		input.start();
+		rafId = requestAnimationFrame(gameLoop);
+	}
+
 	return {
 		start() {
 			if (state !== 'waiting') return;
 			setState('playing');
-			audio.start();
-
-			const buffer = generateBackingTrack(audio.ctx, chart.bpm, chart.notes[chart.notes.length - 1].t + 3, chart.style);
-			trackSource = audio.ctx.createBufferSource();
-			trackSource.buffer = buffer;
-			trackSource.connect(audio.ctx.destination);
-			trackSource.start();
-
-			input.start();
-			rafId = requestAnimationFrame(gameLoop);
+			startPlayback();
 		},
 		pause() {
 			if (state !== 'playing') return;
@@ -208,10 +260,31 @@ export function createEngine(
 			audio.ctx.resume();
 			rafId = requestAnimationFrame(gameLoop);
 		},
+		restart() {
+			// Stop current playback
+			cancelAnimationFrame(rafId);
+			input.stop();
+			try { trackSource?.stop(); } catch { /* already stopped */ }
+			audio.stop();
+
+			// Reset state
+			score = emptyScore();
+			hitNotes = new Set<number>();
+			flashes = [];
+			activeHolds = new Map();
+			lastDeltaMs = null;
+			setScore(score);
+
+			// Restart
+			setState('playing');
+			audio.ctx.resume().then(() => {
+				startPlayback();
+			});
+		},
 		destroy() {
 			cancelAnimationFrame(rafId);
 			input.stop();
-			trackSource?.stop();
+			try { trackSource?.stop(); } catch { /* already stopped */ }
 			audio.stop();
 			window.removeEventListener('resize', onResize);
 		},
@@ -220,6 +293,12 @@ export function createEngine(
 		},
 		getScore() {
 			return score;
+		},
+		getModeConfig() {
+			return modeConfig;
+		},
+		getLastDeltaMs() {
+			return lastDeltaMs;
 		},
 	};
 }

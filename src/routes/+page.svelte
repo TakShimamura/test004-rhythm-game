@@ -17,6 +17,7 @@
 		<a href="/play" class="play-btn">PLAY DEMO</a>
 		<div class="nav-links">
 			<a href="/songs" class="nav-link">SONGS</a>
+			<a href="/profile" class="nav-link">PROFILE</a>
 			<a href="/settings" class="nav-link">SETTINGS</a>
 			{#if $session.data}
 				<span class="user-info">Signed in as {$session.data.user.name}</span>

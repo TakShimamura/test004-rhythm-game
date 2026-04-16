@@ -1,7 +1,24 @@
-import { pgTable, uuid, text, integer, real, timestamp, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, real, timestamp, jsonb, bigint } from 'drizzle-orm/pg-core';
 import { user } from './auth.schema.js';
 
 export { user };
+
+export const playerProfiles = pgTable('player_profiles', {
+	userId: text('user_id').primaryKey().references(() => user.id),
+	xp: integer('xp').default(0).notNull(),
+	level: integer('level').default(1).notNull(),
+	totalPlays: integer('total_plays').default(0).notNull(),
+	totalPlayTimeMs: bigint('total_play_time_ms', { mode: 'number' }).default(0).notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const achievements = pgTable('achievements', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	userId: text('user_id').references(() => user.id).notNull(),
+	type: text('type').notNull(),
+	unlockedAt: timestamp('unlocked_at', { withTimezone: true }).defaultNow().notNull(),
+});
 
 export const songs = pgTable('songs', {
 	id: uuid('id').defaultRandom().primaryKey(),

@@ -4,9 +4,9 @@
 	import { createEngine, type Engine } from '$lib/game/engine.js';
 	import { DEMO_CHART, ALL_CHARTS } from '$lib/chart/songs.js';
 	import { accuracy } from '$lib/game/scoring.js';
-	import { loadSettings, settingsToConfig } from '$lib/game/settings.js';
+	import { loadSettings, saveSettings, settingsToConfig } from '$lib/game/settings.js';
 	import { authClient } from '$lib/auth-client.js';
-	import type { Chart, GameState, ScoreState } from '$lib/game/types.js';
+	import type { Chart, GameState, GameModeConfig, ScoreState } from '$lib/game/types.js';
 
 	let canvas: HTMLCanvasElement;
 	let engine: Engine | null = $state(null);
@@ -21,6 +21,15 @@
 	let leaderboard: { playerName: string; score: number; accuracy: number }[] = $state([]);
 	let displayScore = $state(0);
 	let animatingScore = $state(false);
+	let lastDeltaMs: number | null = $state(null);
+
+	// Mode config state
+	let speedMultiplier = $state(1.0);
+	let mirrorEnabled = $state(false);
+	let noFailEnabled = $state(false);
+	let practiceEnabled = $state(false);
+
+	const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.5, 2.0];
 
 	const session = authClient.useSession();
 
@@ -105,33 +114,73 @@
 		if (res.ok) leaderboard = await res.json();
 	}
 
+	function buildModeConfig(): GameModeConfig {
+		return {
+			mode: practiceEnabled ? 'practice' : noFailEnabled ? 'nofail' : mirrorEnabled ? 'mirror' : 'normal',
+			speedMultiplier,
+			mirror: mirrorEnabled,
+			noFail: noFailEnabled,
+			practice: practiceEnabled,
+		};
+	}
+
+	let loadedChart: Chart | null = null;
+
+	function initEngine(chart: Chart) {
+		engine?.destroy();
+		score = { score: 0, combo: 0, maxCombo: 0, perfects: 0, goods: 0, misses: 0 };
+		displayScore = 0;
+		scoreSubmitted = false;
+		gameState = 'waiting';
+
+		const settings = loadSettings();
+		const config = settingsToConfig(settings);
+		laneKeys = settings.laneKeys;
+		const mc = buildModeConfig();
+
+		engine = createEngine(canvas, chart, config, {
+			onStateChange(s) {
+				gameState = s;
+				if (s === 'results') {
+					submitScore(chart.id, score);
+				}
+			},
+			onScoreChange(s) {
+				score = s;
+				lastDeltaMs = engine?.getLastDeltaMs() ?? null;
+			},
+		}, mc);
+	}
+
 	onMount(() => {
+		const settings = loadSettings();
+		speedMultiplier = settings.defaultSpeedMultiplier;
+		mirrorEnabled = settings.defaultMirror;
+
 		loadChart().then((chart) => {
 			chartBpm = chart.bpm;
 			activeChartId = chart.id;
 			loading = false;
-
-			const settings = loadSettings();
-			const config = settingsToConfig(settings);
-			laneKeys = settings.laneKeys;
-			engine = createEngine(canvas, chart, config, {
-				onStateChange(s) {
-					gameState = s;
-					if (s === 'results') {
-						submitScore(chart.id, score);
-					}
-				},
-				onScoreChange(s) {
-					score = s;
-				},
-			});
+			loadedChart = chart;
+			initEngine(chart);
 		});
 
 		return () => engine?.destroy();
 	});
 
 	function handleStart() {
-		engine?.start();
+		// Re-init engine with latest mode config before starting
+		if (loadedChart) {
+			initEngine(loadedChart);
+		}
+		// Use a microtask to let the engine initialize
+		queueMicrotask(() => engine?.start());
+
+		// Persist speed/mirror preferences
+		const settings = loadSettings();
+		settings.defaultSpeedMultiplier = speedMultiplier;
+		settings.defaultMirror = mirrorEnabled;
+		saveSettings(settings);
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -139,6 +188,10 @@
 			engine?.pause();
 		} else if (e.key === 'Escape' && gameState === 'paused') {
 			engine?.resume();
+		}
+		// Practice mode: R to restart
+		if (e.key === 'r' && practiceEnabled && (gameState === 'playing' || gameState === 'paused')) {
+			engine?.restart();
 		}
 	}
 </script>
@@ -162,10 +215,77 @@
 				<span class="key key-s pulse-key" style="animation-delay: 0.15s">{laneKeys[1].toUpperCase()}</span>
 				<span class="key key-d pulse-key" style="animation-delay: 0.3s">{laneKeys[2].toUpperCase()}</span>
 			</div>
+
+			<div class="mode-options">
+				<div class="speed-selector">
+					<span class="mode-label">SPEED</span>
+					<div class="speed-buttons">
+						{#each SPEED_OPTIONS as spd}
+							<button
+								class="speed-btn"
+								class:active={speedMultiplier === spd}
+								onclick={() => { speedMultiplier = spd; }}
+							>
+								{spd}x
+							</button>
+						{/each}
+					</div>
+				</div>
+				<div class="toggle-row">
+					<button
+						class="toggle-btn"
+						class:active={mirrorEnabled}
+						onclick={() => { mirrorEnabled = !mirrorEnabled; }}
+					>
+						MIRROR
+					</button>
+					<button
+						class="toggle-btn"
+						class:active={noFailEnabled}
+						onclick={() => { noFailEnabled = !noFailEnabled; }}
+					>
+						NO FAIL
+					</button>
+					<button
+						class="toggle-btn"
+						class:active={practiceEnabled}
+						onclick={() => { practiceEnabled = !practiceEnabled; }}
+					>
+						PRACTICE
+					</button>
+				</div>
+			</div>
+
 			<button class="start-btn glow-btn" onclick={handleStart}>
 				PRESS TO START
 			</button>
 			<p class="hint">Hit the notes as they reach the circles</p>
+			{#if practiceEnabled}
+				<p class="hint">Practice: press R to restart</p>
+			{/if}
+		</div>
+	{/if}
+
+	{#if gameState === 'playing'}
+		<div class="mode-hud">
+			{#if noFailEnabled}
+				<span class="hud-tag nofail-tag">NO FAIL</span>
+			{/if}
+			{#if mirrorEnabled}
+				<span class="hud-tag mirror-tag">MIRROR</span>
+			{/if}
+			{#if speedMultiplier !== 1.0}
+				<span class="hud-tag speed-tag">{speedMultiplier}x</span>
+			{/if}
+			{#if practiceEnabled}
+				<span class="hud-tag practice-tag">PRACTICE</span>
+				{#if lastDeltaMs !== null}
+					<span class="hud-delta" class:early={lastDeltaMs < 0} class:late={lastDeltaMs > 0}>
+						{lastDeltaMs > 0 ? '+' : ''}{lastDeltaMs.toFixed(1)}ms
+					</span>
+				{/if}
+				<span class="hud-hint">R = restart</span>
+			{/if}
 		</div>
 	{/if}
 
@@ -173,6 +293,9 @@
 		<div class="overlay fade-in">
 			<h2 class="title-glow">PAUSED</h2>
 			<p class="hint">Press ESC to resume</p>
+			{#if practiceEnabled}
+				<p class="hint">Press R to restart</p>
+			{/if}
 		</div>
 	{/if}
 
@@ -534,5 +657,145 @@
 
 	@keyframes spin {
 		to { transform: rotate(360deg); }
+	}
+
+	/* Mode selection UI */
+	.mode-options {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 12px;
+		margin: 8px 0;
+	}
+
+	.mode-label {
+		font-family: monospace;
+		font-size: 12px;
+		color: #888;
+		letter-spacing: 2px;
+	}
+
+	.speed-selector {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.speed-buttons {
+		display: flex;
+		gap: 6px;
+	}
+
+	.speed-btn {
+		font-family: monospace;
+		font-size: 14px;
+		padding: 6px 12px;
+		background: transparent;
+		border: 1px solid #333;
+		color: #888;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+
+	.speed-btn:hover {
+		border-color: #4488ff;
+		color: #4488ff;
+	}
+
+	.speed-btn.active {
+		border-color: #4488ff;
+		color: #4488ff;
+		background: rgba(68, 136, 255, 0.15);
+		box-shadow: 0 0 8px rgba(68, 136, 255, 0.2);
+	}
+
+	.toggle-row {
+		display: flex;
+		gap: 8px;
+	}
+
+	.toggle-btn {
+		font-family: monospace;
+		font-size: 12px;
+		padding: 6px 14px;
+		background: transparent;
+		border: 1px solid #333;
+		color: #666;
+		cursor: pointer;
+		letter-spacing: 1px;
+		transition: all 0.15s;
+	}
+
+	.toggle-btn:hover {
+		border-color: #666;
+		color: #aaa;
+	}
+
+	.toggle-btn.active {
+		border-color: #ffdd00;
+		color: #ffdd00;
+		background: rgba(255, 221, 0, 0.1);
+		box-shadow: 0 0 8px rgba(255, 221, 0, 0.15);
+	}
+
+	/* Mode HUD */
+	.mode-hud {
+		position: absolute;
+		top: 8px;
+		right: 8px;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 4px;
+		pointer-events: none;
+		z-index: 10;
+	}
+
+	.hud-tag {
+		font-family: monospace;
+		font-size: 11px;
+		padding: 2px 8px;
+		letter-spacing: 1px;
+		border-radius: 3px;
+	}
+
+	.nofail-tag {
+		color: #ff8844;
+		background: rgba(255, 136, 68, 0.15);
+		border: 1px solid rgba(255, 136, 68, 0.3);
+	}
+
+	.mirror-tag {
+		color: #cc44ff;
+		background: rgba(204, 68, 255, 0.15);
+		border: 1px solid rgba(204, 68, 255, 0.3);
+	}
+
+	.speed-tag {
+		color: #44ddff;
+		background: rgba(68, 221, 255, 0.15);
+		border: 1px solid rgba(68, 221, 255, 0.3);
+	}
+
+	.practice-tag {
+		color: #ffdd00;
+		background: rgba(255, 221, 0, 0.15);
+		border: 1px solid rgba(255, 221, 0, 0.3);
+	}
+
+	.hud-delta {
+		font-family: monospace;
+		font-size: 13px;
+		font-weight: bold;
+	}
+
+	.hud-delta.early { color: #44aaff; }
+	.hud-delta.late { color: #ff8844; }
+
+	.hud-hint {
+		font-family: monospace;
+		font-size: 10px;
+		color: #555;
 	}
 </style>

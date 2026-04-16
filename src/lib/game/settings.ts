@@ -1,5 +1,5 @@
-import type { GameConfig } from './types.js';
-import { DEFAULT_CONFIG } from './types.js';
+import type { GameConfig, GameModeConfig } from './types.js';
+import { DEFAULT_CONFIG, DEFAULT_MODE_CONFIG } from './types.js';
 
 const STORAGE_KEY = 'rhythm-game-settings';
 
@@ -7,12 +7,16 @@ export type UserSettings = {
 	laneKeys: [string, string, string];
 	audioOffsetMs: number;
 	scrollSpeedPx: number;
+	defaultSpeedMultiplier: number;
+	defaultMirror: boolean;
 };
 
 const DEFAULTS: UserSettings = {
 	laneKeys: DEFAULT_CONFIG.laneKeys,
 	audioOffsetMs: DEFAULT_CONFIG.audioOffsetMs,
 	scrollSpeedPx: DEFAULT_CONFIG.scrollSpeedPx,
+	defaultSpeedMultiplier: DEFAULT_MODE_CONFIG.speedMultiplier,
+	defaultMirror: DEFAULT_MODE_CONFIG.mirror,
 };
 
 export function loadSettings(): UserSettings {
@@ -31,6 +35,12 @@ export function loadSettings(): UserSettings {
 			scrollSpeedPx: typeof parsed.scrollSpeedPx === 'number'
 				? parsed.scrollSpeedPx
 				: DEFAULTS.scrollSpeedPx,
+			defaultSpeedMultiplier: typeof parsed.defaultSpeedMultiplier === 'number'
+				? parsed.defaultSpeedMultiplier
+				: DEFAULTS.defaultSpeedMultiplier,
+			defaultMirror: typeof parsed.defaultMirror === 'boolean'
+				? parsed.defaultMirror
+				: DEFAULTS.defaultMirror,
 		};
 	} catch {
 		return { ...DEFAULTS };
@@ -48,5 +58,13 @@ export function settingsToConfig(settings: UserSettings): GameConfig {
 		laneKeys: settings.laneKeys,
 		audioOffsetMs: settings.audioOffsetMs,
 		scrollSpeedPx: settings.scrollSpeedPx,
+	};
+}
+
+export function settingsToModeConfig(settings: UserSettings): GameModeConfig {
+	return {
+		...DEFAULT_MODE_CONFIG,
+		speedMultiplier: settings.defaultSpeedMultiplier,
+		mirror: settings.defaultMirror,
 	};
 }
