@@ -11,6 +11,9 @@
 	import type { Chart, ChartModifier, GameState, GameModeConfig, ScoreState } from '$lib/game/types.js';
 	import { calculateDifficultyStars, getDifficultyLabel, getDifficultyColor } from '$lib/game/difficulty-calc.js';
 	import { suggestDifficulty } from '$lib/game/auto-difficulty.js';
+	import { preloadForGameplay, type PreloadProgress } from '$lib/game/preloader.js';
+	import { createPerfMonitor } from '$lib/game/perf-monitor.js';
+	import LoadingScreen from '$lib/components/LoadingScreen.svelte';
 
 	let canvas: HTMLCanvasElement;
 	let shareCanvas: HTMLCanvasElement | undefined = $state(undefined);
@@ -22,6 +25,9 @@
 	let chartTitle = $state('Demo Chart');
 	let chartBpm = $state(120);
 	let loading = $state(true);
+	let preloading = $state(false);
+	let preloadProgress = $state<PreloadProgress>({ progress: 0, status: 'Loading...' });
+	let preloadDone = $state(false);
 	let activeChartId = $state('');
 	let scoreSubmitted = $state(false);
 	let leaderboard: { playerName: string; score: number; accuracy: number }[] = $state([]);
@@ -60,6 +66,30 @@
 	const TOUCH_LANE_COLORS = ['#ff4466', '#44ff66', '#4488ff'];
 	const TOUCH_LANE_LABELS = ['A', 'S', 'D'];
 
+	// Performance monitor
+	const perfMonitor = createPerfMonitor();
+	let fpsDisplay = $state('');
+	let perfRafId: number | null = null;
+
+	function startPerfLoop() {
+		if (!import.meta.env.DEV) return;
+		perfMonitor.reset();
+		function loop() {
+			perfMonitor.tick();
+			const stats = perfMonitor.getStats();
+			fpsDisplay = `${stats.fps} FPS | ${stats.avgFrameTime}ms | jank: ${stats.jankCount}`;
+			perfRafId = requestAnimationFrame(loop);
+		}
+		perfRafId = requestAnimationFrame(loop);
+	}
+
+	function stopPerfLoop() {
+		if (perfRafId !== null) {
+			cancelAnimationFrame(perfRafId);
+			perfRafId = null;
+		}
+	}
+
 	const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.5, 2.0];
 
 	const session = authClient.useSession();
@@ -96,6 +126,10 @@
 	$effect(() => {
 		if (gameState === 'results') {
 			animateScore(score.score);
+			stopPerfLoop();
+		}
+		if (gameState === 'failed') {
+			stopPerfLoop();
 		}
 	});
 
@@ -291,8 +325,21 @@
 		loadChart().then(async (chart) => {
 			chartBpm = chart.bpm;
 			activeChartId = chart.id;
-			loading = false;
 			loadedChart = chart;
+
+			// Preload chart data + audio (if available) with progress
+			preloading = true;
+			const audioUrl = chart.songId ? `/uploads/${chart.songId}.mp3` : null;
+			try {
+				await preloadForGameplay(chart.id, audioUrl, (p) => {
+					preloadProgress = p;
+				});
+			} catch {
+				// Preload failures are non-fatal — the engine will fetch on demand
+			}
+			preloading = false;
+			preloadDone = true;
+			loading = false;
 			initEngine(chart);
 
 			// Load difficulty suggestion from recent scores
@@ -315,6 +362,7 @@
 
 		return () => {
 			engine?.destroy();
+			stopPerfLoop();
 			if (isMobile) {
 				window.removeEventListener('touchstart', updateTouchZones);
 				window.removeEventListener('touchmove', updateTouchZones);
@@ -332,6 +380,8 @@
 		if (loadedChart) {
 			initEngine(loadedChart);
 		}
+		// Start perf monitoring during gameplay
+		startPerfLoop();
 		// Use a microtask to let the engine initialize
 		queueMicrotask(() => engine?.start());
 
@@ -391,10 +441,11 @@
 	<canvas bind:this={canvas} class="game-canvas"></canvas>
 
 	{#if loading}
-		<div class="overlay fade-in">
-			<div class="spinner"></div>
-			<p class="subtitle">Loading chart...</p>
-		</div>
+		<LoadingScreen
+			progress={preloadProgress.progress}
+			status={preloadProgress.status}
+			done={preloadDone}
+		/>
 	{:else if gameState === 'waiting'}
 		<div class="overlay fade-in">
 			<h1 class="title-glow">RHYTHM GAME</h1>
@@ -492,6 +543,9 @@
 	{/if}
 
 	{#if gameState === 'playing'}
+		{#if import.meta.env.DEV && fpsDisplay}
+			<div class="fps-counter">{fpsDisplay}</div>
+		{/if}
 		<div class="mode-hud">
 			{#if noFailEnabled}
 				<span class="hud-tag nofail-tag">NO FAIL</span>
@@ -1273,6 +1327,21 @@
 		color: #ffdd00;
 		background: rgba(255, 221, 0, 0.15);
 		border: 1px solid rgba(255, 221, 0, 0.3);
+	}
+
+	/* FPS counter (dev only) */
+	.fps-counter {
+		position: absolute;
+		top: 4px;
+		left: 4px;
+		font-family: monospace;
+		font-size: 11px;
+		color: #44ff66;
+		background: rgba(0, 0, 0, 0.6);
+		padding: 2px 6px;
+		border-radius: 3px;
+		pointer-events: none;
+		z-index: 10;
 	}
 
 	/* Mode HUD */
