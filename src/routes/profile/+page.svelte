@@ -540,16 +540,37 @@
 		text-align: right;
 	}
 
-	@media (max-width: 640px) {
+	@media (max-width: 768px) {
+		.profile-page {
+			padding: 24px 16px;
+		}
+
+		.profile-header {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 8px;
+		}
+
+		.player-name {
+			font-size: 22px;
+		}
+
 		.stats-grid {
 			grid-template-columns: repeat(2, 1fr);
 		}
+
 		.achievements-grid {
 			grid-template-columns: 1fr;
 		}
+
 		.history-item {
 			grid-template-columns: 1fr 1fr;
 			gap: 4px;
+			font-size: 12px;
+		}
+
+		.history-song {
+			grid-column: 1 / -1;
 		}
 	}
 </style>

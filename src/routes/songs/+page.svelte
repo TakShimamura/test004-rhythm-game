@@ -268,4 +268,27 @@
 		font-size: 10px;
 		margin-left: 4px;
 	}
+
+	/* Mobile responsive */
+	@media (max-width: 768px) {
+		h1 {
+			font-size: 28px;
+		}
+
+		.controls {
+			max-width: 100%;
+		}
+
+		.song-list {
+			max-width: 100%;
+		}
+
+		.song-card {
+			padding: 12px;
+		}
+
+		.chart-links {
+			flex-wrap: wrap;
+		}
+	}
 </style>

@@ -1,8 +1,13 @@
-import type { Chart, GameConfig, Lane, MusicStyle, NoteSkin, ScoreState, JudgmentGrade } from './types.js';
+import type { Chart, GameConfig, Lane, MusicStyle, NoteSkin, ScoreState, JudgmentGrade, HighwayTheme, HitEffect, ComboColor } from './types.js';
 
-const LANE_COLORS = ['#ff4466', '#44ff66', '#4488ff'] as const;
-const LANE_GLOW_COLORS = ['rgba(255,68,102,', 'rgba(68,255,102,', 'rgba(68,136,255,'] as const;
-const LANE_RGB = ['255,68,102', '68,255,102', '68,136,255'] as const;
+const LANE_COLORS_DEFAULT = ['#ff4466', '#44ff66', '#4488ff'] as const;
+const LANE_GLOW_COLORS_DEFAULT = ['rgba(255,68,102,', 'rgba(68,255,102,', 'rgba(68,136,255,'] as const;
+const LANE_RGB_DEFAULT = ['255,68,102', '68,255,102', '68,136,255'] as const;
+
+// Colorblind-safe palette
+const LANE_COLORS_CB = ['#0077BB', '#EE7733', '#009988'] as const;
+const LANE_GLOW_COLORS_CB = ['rgba(0,119,187,', 'rgba(238,119,51,', 'rgba(0,153,136,'] as const;
+const LANE_RGB_CB = ['0,119,187', '238,119,51', '0,153,136'] as const;
 
 // ----- Style theme palettes -----
 type ThemePalette = { bg1: string; bg2: string; bg3: string; accent: string; gridColor: string; hue: number };
@@ -105,9 +110,23 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 	const FULL_COMBO_FLASH_DURATION = 0.4;
 
 	const noteSkin: NoteSkin = config.noteSkin ?? 'classic';
+	const highwayTheme: HighwayTheme = config.highwayTheme ?? 'default';
+	const hitEffect: HitEffect = config.hitEffect ?? 'sparkle';
+	const comboColorMode: ComboColor = config.comboColor ?? 'default';
+	const colorblindMode: boolean = config.colorblindMode ?? false;
+	const noteScale: number = config.noteScale ?? 1.0;
+
+	// Choose palette based on colorblind mode
+	const LANE_COLORS: readonly string[] = colorblindMode ? LANE_COLORS_CB : LANE_COLORS_DEFAULT;
+	const LANE_GLOW_COLORS: readonly string[] = colorblindMode ? LANE_GLOW_COLORS_CB : LANE_GLOW_COLORS_DEFAULT;
+	const LANE_RGB: readonly string[] = colorblindMode ? LANE_RGB_CB : LANE_RGB_DEFAULT;
 
 	const beatDuration = 60 / chart.bpm;
 	const theme = chart.style ? STYLE_THEMES[chart.style] : DEFAULT_THEME;
+
+	// ----- Highway theme ambient particle state -----
+	type AmbientParticle = { x: number; y: number; vx: number; vy: number; size: number; life: number; maxLife: number; hue: number; type: string };
+	const ambientParticles: AmbientParticle[] = [];
 
 	const HIT_ZONE_Y_RATIO = 0.85;
 
@@ -144,27 +163,97 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 	}
 
 	// ----- Particle spawning -----
-	function spawnParticles(lane: Lane, grade: JudgmentGrade) {
-		if (grade === 'miss') return;
-		const hitZoneY = h * HIT_ZONE_Y_RATIO;
-		const { left, lw } = getHighwayXAtY(hitZoneY);
-		const cx = left + lane * lw + lw / 2;
+	function spawnParticlesSparkle(cx: number, hitZoneY: number, lane: Lane, grade: JudgmentGrade) {
 		const count = grade === 'perfect' ? 24 : 12;
 		const color = LANE_COLORS[lane];
 		for (let i = 0; i < count; i++) {
 			const angle = (Math.PI * 2 * i) / count + Math.random() * 0.4;
 			const speed = 100 + Math.random() * 250;
 			particles.push({
-				x: cx,
-				y: hitZoneY,
+				x: cx, y: hitZoneY,
 				vx: Math.cos(angle) * speed,
 				vy: Math.sin(angle) * speed - 60,
 				life: 0.5 + Math.random() * 0.4,
 				maxLife: 0.5 + Math.random() * 0.4,
-				color,
-				size: 2 + Math.random() * 4,
+				color, size: 2 + Math.random() * 4,
 				trail: grade === 'perfect',
 			});
+		}
+	}
+
+	function spawnParticlesSplash(cx: number, hitZoneY: number, lane: Lane, grade: JudgmentGrade) {
+		const count = grade === 'perfect' ? 20 : 10;
+		for (let i = 0; i < count; i++) {
+			// Arc pattern spreading upward like a wave
+			const angle = -Math.PI * (0.15 + 0.7 * (i / count));
+			const speed = 80 + Math.random() * 200;
+			const hue = 190 + Math.random() * 40; // blue-ish
+			particles.push({
+				x: cx + (Math.random() - 0.5) * 20,
+				y: hitZoneY,
+				vx: Math.cos(angle) * speed,
+				vy: Math.sin(angle) * speed,
+				life: 0.6 + Math.random() * 0.3,
+				maxLife: 0.6 + Math.random() * 0.3,
+				color: `hsl(${hue}, 80%, ${55 + Math.random() * 20}%)`,
+				size: 2.5 + Math.random() * 3,
+				trail: false,
+			});
+		}
+	}
+
+	function spawnParticlesLightning(cx: number, hitZoneY: number, _lane: Lane, grade: JudgmentGrade) {
+		const count = grade === 'perfect' ? 16 : 8;
+		for (let i = 0; i < count; i++) {
+			const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+			const speed = 200 + Math.random() * 400; // fast
+			const lightness = 70 + Math.random() * 30;
+			particles.push({
+				x: cx, y: hitZoneY,
+				vx: Math.cos(angle) * speed,
+				vy: Math.sin(angle) * speed,
+				life: 0.15 + Math.random() * 0.15, // fast decay
+				maxLife: 0.15 + Math.random() * 0.15,
+				color: `hsl(${50 + Math.random() * 10}, 100%, ${lightness}%)`, // white/yellow
+				size: 1.5 + Math.random() * 2,
+				trail: true,
+			});
+		}
+	}
+
+	function spawnParticlesPixel(cx: number, hitZoneY: number, lane: Lane, grade: JudgmentGrade) {
+		const count = grade === 'perfect' ? 20 : 10;
+		const color = LANE_COLORS[lane];
+		const gridStep = 8;
+		for (let i = 0; i < count; i++) {
+			// Grid-explosion: snap positions to grid
+			const gx = Math.round((Math.random() - 0.5) * 6) * gridStep;
+			const gy = Math.round((Math.random() - 0.5) * 6) * gridStep;
+			const speed = 60 + Math.random() * 120;
+			const angle = Math.atan2(gy, gx || 0.1);
+			particles.push({
+				x: cx + gx, y: hitZoneY + gy,
+				vx: Math.cos(angle) * speed,
+				vy: Math.sin(angle) * speed - 30,
+				life: 0.4 + Math.random() * 0.3,
+				maxLife: 0.4 + Math.random() * 0.3,
+				color,
+				size: gridStep * 0.45, // square-ish small pixels
+				trail: false,
+			});
+		}
+	}
+
+	function spawnParticles(lane: Lane, grade: JudgmentGrade) {
+		if (grade === 'miss') return;
+		const hitZoneY = h * HIT_ZONE_Y_RATIO;
+		const { left, lw } = getHighwayXAtY(hitZoneY);
+		const cx = left + lane * lw + lw / 2;
+		switch (hitEffect) {
+			case 'splash': spawnParticlesSplash(cx, hitZoneY, lane, grade); break;
+			case 'lightning': spawnParticlesLightning(cx, hitZoneY, lane, grade); break;
+			case 'pixel': spawnParticlesPixel(cx, hitZoneY, lane, grade); break;
+			default: spawnParticlesSparkle(cx, hitZoneY, lane, grade); break;
 		}
 		laneFlashes.push({ lane, time: performance.now() / 1000, intensity: grade === 'perfect' ? 1.0 : 0.6 });
 	}
@@ -193,6 +282,21 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		}
 	}
 
+	function getComboParticleColor(combo: number): string {
+		switch (comboColorMode) {
+			case 'rainbow': return `hsl(${(combo * 7 + Math.random() * 30) % 360}, 100%, ${60 + Math.random() * 20}%)`;
+			case 'fire': {
+				const fi = Math.min(1, combo / 100);
+				return `hsl(${20 - fi * 15 + Math.random() * 10}, 100%, ${55 + fi * 25 + Math.random() * 10}%)`;
+			}
+			case 'ice': {
+				const ii = Math.min(1, combo / 100);
+				return `hsl(${200 - ii * 20 + Math.random() * 15}, 80%, ${60 + ii * 20 + Math.random() * 10}%)`;
+			}
+			default: return `hsl(${30 + Math.random() * 30}, 100%, ${60 + Math.random() * 20}%)`;
+		}
+	}
+
 	function spawnComboFireParticles(score: ScoreState) {
 		if (score.combo < 10) return;
 		const intensity = Math.min(1, (score.combo - 10) / 40);
@@ -200,7 +304,6 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		for (let i = 0; i < count; i++) {
 			const x = 20 + Math.random() * 100;
 			const y = 60;
-			const hue = 30 + Math.random() * 30;
 			particles.push({
 				x,
 				y,
@@ -208,7 +311,7 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 				vy: -(60 + Math.random() * 100),
 				life: 0.4 + Math.random() * 0.4,
 				maxLife: 0.4 + Math.random() * 0.4,
-				color: `hsl(${hue}, 100%, ${60 + Math.random() * 20}%)`,
+				color: getComboParticleColor(score.combo),
 				size: 2 + Math.random() * 3,
 			});
 		}
@@ -300,19 +403,6 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			for (let i = 0; i < fireCount; i++) {
 				const baseX = side === 0 ? botH.left : botH.right;
 				const yPos = hitZoneY - Math.random() * hitZoneY * 0.6;
-				// Color shifts with intensity: orange -> yellow -> white
-				let hue: number;
-				let lightness: number;
-				if (intensity < 0.5) {
-					hue = 20 + Math.random() * 20; // orange
-					lightness = 50 + Math.random() * 15;
-				} else if (intensity < 0.8) {
-					hue = 35 + Math.random() * 20; // yellow-orange
-					lightness = 55 + Math.random() * 20;
-				} else {
-					hue = 40 + Math.random() * 20; // yellow-white
-					lightness = 65 + Math.random() * 25;
-				}
 				particles.push({
 					x: baseX + (Math.random() - 0.5) * 20,
 					y: yPos,
@@ -320,26 +410,31 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 					vy: -(40 + Math.random() * 80 * intensity),
 					life: 0.2 + Math.random() * 0.3,
 					maxLife: 0.2 + Math.random() * 0.3,
-					color: `hsl(${hue}, 100%, ${lightness}%)`,
+					color: getComboParticleColor(combo),
 					size: 1.5 + Math.random() * 3 * intensity,
 				});
 			}
 		}
 
-		// Highway edge glow: orange/red on both sides
+		// Highway edge glow color based on combo color mode
 		const glowAlpha = 0.05 + intensity * 0.15 + beatPulse * 0.05;
+		let edgeGlowColor: string;
+		switch (comboColorMode) {
+			case 'rainbow': edgeGlowColor = `hsla(${(combo * 7) % 360}, 100%, 55%, ${glowAlpha})`; break;
+			case 'fire': edgeGlowColor = `rgba(255, 80, 10, ${glowAlpha})`; break;
+			case 'ice': edgeGlowColor = `rgba(80, 200, 255, ${glowAlpha})`; break;
+			default: edgeGlowColor = `rgba(255, 100, 20, ${glowAlpha})`; break;
+		}
 		ctx.save();
-		// Left edge glow
 		const leftGrad = ctx.createLinearGradient(topH.left - 30, 0, topH.left + 40, 0);
 		leftGrad.addColorStop(0, 'transparent');
-		leftGrad.addColorStop(0.4, `rgba(255, 100, 20, ${glowAlpha})`);
+		leftGrad.addColorStop(0.4, edgeGlowColor);
 		leftGrad.addColorStop(1, 'transparent');
 		ctx.fillStyle = leftGrad;
 		ctx.fillRect(topH.left - 30, 0, 70, hitZoneY + 40);
-		// Right edge glow
 		const rightGrad = ctx.createLinearGradient(topH.right - 40, 0, topH.right + 30, 0);
 		rightGrad.addColorStop(0, 'transparent');
-		rightGrad.addColorStop(0.6, `rgba(255, 100, 20, ${glowAlpha})`);
+		rightGrad.addColorStop(0.6, edgeGlowColor);
 		rightGrad.addColorStop(1, 'transparent');
 		ctx.fillStyle = rightGrad;
 		ctx.fillRect(topH.right - 40, 0, 70, hitZoneY + 40);
@@ -420,8 +515,291 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 
 	// ----- Draw helpers -----
 
+	// ----- Highway theme helpers -----
+	function getThemeLaneSepColor(bp: number): string {
+		switch (highwayTheme) {
+			case 'space': return `rgba(120, 80, 255, ${0.15 + bp * 0.12})`;
+			case 'ocean': return `rgba(40, 140, 220, ${0.12 + bp * 0.1})`;
+			case 'cyberpunk': return `rgba(255, 40, 180, ${0.18 + bp * 0.15})`;
+			case 'forest': return `rgba(60, 180, 80, ${0.12 + bp * 0.1})`;
+			default: return `rgba(${theme.gridColor}, ${0.12 + bp * 0.1})`;
+		}
+	}
+
+	function getThemeHitZoneGlow(): string {
+		switch (highwayTheme) {
+			case 'space': return '#8844ff';
+			case 'ocean': return '#00ccff';
+			case 'cyberpunk': return '#ff00cc';
+			case 'forest': return '#44ff88';
+			default: return theme.accent;
+		}
+	}
+
+	function drawBackgroundSpace(currentTime: number, combo: number, beatPulse: number) {
+		const comboIntensity = Math.min(1, combo / 50);
+		ctx.fillStyle = '#020208';
+		ctx.fillRect(0, 0, w, h);
+		const nebulaPositions = [
+			{ x: w * 0.2, y: h * 0.3, r: w * 0.35, h1: 270, h2: 240 },
+			{ x: w * 0.8, y: h * 0.6, r: w * 0.3, h1: 220, h2: 280 },
+			{ x: w * 0.5, y: h * 0.15, r: w * 0.25, h1: 300, h2: 260 },
+		];
+		for (const neb of nebulaPositions) {
+			const drift = Math.sin(currentTime * 0.1 + neb.h1) * 20;
+			const ng = ctx.createRadialGradient(neb.x + drift, neb.y, 0, neb.x + drift, neb.y, neb.r);
+			ng.addColorStop(0, `hsla(${neb.h1}, 60%, 15%, ${0.08 + comboIntensity * 0.06 + beatPulse * 0.04})`);
+			ng.addColorStop(0.5, `hsla(${neb.h2}, 50%, 10%, ${0.04 + comboIntensity * 0.03})`);
+			ng.addColorStop(1, 'transparent');
+			ctx.fillStyle = ng;
+			ctx.fillRect(0, 0, w, h);
+		}
+		const planetX = w * 0.85;
+		const planetY = h * 0.18;
+		const planetR = Math.min(w, h) * 0.08;
+		ctx.save();
+		ctx.beginPath();
+		ctx.arc(planetX, planetY, planetR, 0, Math.PI * 2);
+		ctx.fillStyle = '#0a0a18';
+		ctx.fill();
+		ctx.beginPath();
+		ctx.arc(planetX, planetY, planetR + 2, 0, Math.PI * 2);
+		ctx.strokeStyle = `rgba(120, 80, 255, ${0.15 + beatPulse * 0.1})`;
+		ctx.lineWidth = 2;
+		ctx.stroke();
+		ctx.restore();
+		if (beatPulse > 0.05) {
+			const pr = w * 0.6 * (1 + beatPulse * 0.2);
+			const pg = ctx.createRadialGradient(w / 2, h * 0.5, 0, w / 2, h * 0.5, pr);
+			pg.addColorStop(0, `hsla(270, 70%, 30%, ${beatPulse * 0.06 * (1 + comboIntensity)})`);
+			pg.addColorStop(1, 'transparent');
+			ctx.fillStyle = pg;
+			ctx.fillRect(0, 0, w, h);
+		}
+	}
+
+	function drawBackgroundOcean(currentTime: number, combo: number, beatPulse: number) {
+		const comboIntensity = Math.min(1, combo / 50);
+		const grad = ctx.createLinearGradient(0, 0, 0, h);
+		grad.addColorStop(0, '#020818');
+		grad.addColorStop(0.5, '#041228');
+		grad.addColorStop(1, '#061830');
+		ctx.fillStyle = grad;
+		ctx.fillRect(0, 0, w, h);
+		ctx.save();
+		ctx.strokeStyle = `rgba(40, 120, 200, ${0.06 + beatPulse * 0.04})`;
+		ctx.lineWidth = 1;
+		for (let waveIdx = 0; waveIdx < 5; waveIdx++) {
+			const baseY = h * (0.15 + waveIdx * 0.18);
+			ctx.beginPath();
+			for (let x = 0; x <= w; x += 4) {
+				const y = baseY + Math.sin(x * 0.008 + currentTime * (0.5 + waveIdx * 0.2) + waveIdx) * (8 + waveIdx * 3);
+				if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+			}
+			ctx.stroke();
+		}
+		ctx.restore();
+		for (let i = 0; i < 4; i++) {
+			const gx = w * (0.15 + (i * 0.23) + Math.sin(currentTime * 0.3 + i * 2) * 0.05);
+			const gy = h * (0.3 + Math.cos(currentTime * 0.2 + i * 1.5) * 0.15);
+			const gr = 30 + Math.sin(currentTime * 0.8 + i) * 10;
+			const al = 0.04 + comboIntensity * 0.03 + beatPulse * 0.02;
+			const gg = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
+			gg.addColorStop(0, `rgba(0, 200, 255, ${al})`);
+			gg.addColorStop(1, 'transparent');
+			ctx.fillStyle = gg;
+			ctx.fillRect(gx - gr, gy - gr, gr * 2, gr * 2);
+		}
+		if (ambientParticles.length < 30 && Math.random() < 0.15) {
+			ambientParticles.push({ x: Math.random() * w, y: h + 10, vx: (Math.random() - 0.5) * 15, vy: -(20 + Math.random() * 40), size: 2 + Math.random() * 4, life: 4 + Math.random() * 4, maxLife: 4 + Math.random() * 4, hue: 190 + Math.random() * 30, type: 'bubble' });
+		}
+		if (beatPulse > 0.05) {
+			const pg = ctx.createRadialGradient(w / 2, h * 0.6, 0, w / 2, h * 0.6, w * 0.5);
+			pg.addColorStop(0, `hsla(200, 70%, 25%, ${beatPulse * 0.06 * (1 + comboIntensity)})`);
+			pg.addColorStop(1, 'transparent');
+			ctx.fillStyle = pg;
+			ctx.fillRect(0, 0, w, h);
+		}
+	}
+
+	function drawBackgroundCyberpunk(currentTime: number, combo: number, beatPulse: number) {
+		const comboIntensity = Math.min(1, combo / 50);
+		const grad = ctx.createLinearGradient(0, 0, 0, h);
+		grad.addColorStop(0, '#08020e');
+		grad.addColorStop(0.5, '#0a0418');
+		grad.addColorStop(1, '#060214');
+		ctx.fillStyle = grad;
+		ctx.fillRect(0, 0, w, h);
+		const hexSize = 50;
+		const hexH = hexSize * Math.sqrt(3);
+		const hexAlpha = 0.04 + beatPulse * 0.03;
+		ctx.save();
+		ctx.strokeStyle = `rgba(255, 0, 180, ${hexAlpha})`;
+		ctx.lineWidth = 0.5;
+		const cols = Math.ceil(w / (hexSize * 1.5)) + 2;
+		const rows = Math.ceil(h / hexH) + 2;
+		const hexOffY = (currentTime * 20) % hexH;
+		for (let row = -1; row < rows; row++) {
+			for (let col = -1; col < cols; col++) {
+				const cx = col * hexSize * 1.5;
+				const cy = row * hexH + (col % 2 === 0 ? 0 : hexH / 2) + hexOffY;
+				ctx.beginPath();
+				for (let i = 0; i < 6; i++) {
+					const angle = (Math.PI / 3) * i + Math.PI / 6;
+					const px = cx + hexSize * 0.4 * Math.cos(angle);
+					const py = cy + hexSize * 0.4 * Math.sin(angle);
+					if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+				}
+				ctx.closePath();
+				ctx.stroke();
+			}
+		}
+		ctx.restore();
+		ctx.save();
+		const glitchCount = 2 + Math.floor(beatPulse * 4);
+		for (let i = 0; i < glitchCount; i++) {
+			const gy = (Math.sin(currentTime * 13.7 + i * 97.3) * 0.5 + 0.5) * h;
+			const gAlpha = 0.03 + beatPulse * 0.05 + comboIntensity * 0.02;
+			ctx.fillStyle = Math.random() > 0.5 ? `rgba(255, 20, 150, ${gAlpha})` : `rgba(0, 255, 255, ${gAlpha})`;
+			ctx.fillRect(0, gy, w, 1 + Math.random() * 2);
+		}
+		ctx.restore();
+		ctx.save();
+		const skylineY = h * 0.88;
+		ctx.fillStyle = '#0a0212';
+		ctx.beginPath();
+		ctx.moveTo(0, h);
+		const bldgW = [30, 50, 20, 60, 35, 45, 25, 55, 40, 30, 50, 35, 60, 25, 45, 30, 50, 40, 55, 35];
+		let bx = 0;
+		for (let i = 0; bx < w + 60; i++) {
+			const bw = bldgW[i % bldgW.length] * (w / 800);
+			const bh = (20 + ((i * 37 + 13) % 60)) * (h / 600);
+			ctx.lineTo(bx, skylineY - bh);
+			ctx.lineTo(bx + bw, skylineY - bh);
+			bx += bw + (Math.sin(i * 1.3) * 3 + 5) * (w / 800);
+		}
+		ctx.lineTo(w, h);
+		ctx.closePath();
+		ctx.fill();
+		const skyGlow = ctx.createLinearGradient(0, skylineY - 80, 0, skylineY + 10);
+		skyGlow.addColorStop(0, 'transparent');
+		skyGlow.addColorStop(0.5, `rgba(255, 0, 180, ${0.05 + beatPulse * 0.04})`);
+		skyGlow.addColorStop(1, `rgba(0, 255, 255, ${0.03 + beatPulse * 0.03})`);
+		ctx.fillStyle = skyGlow;
+		ctx.fillRect(0, skylineY - 80, w, 90);
+		ctx.restore();
+		if (beatPulse > 0.05) {
+			const pg = ctx.createRadialGradient(w / 2, h * 0.5, 0, w / 2, h * 0.5, w * 0.5);
+			pg.addColorStop(0, `hsla(310, 80%, 30%, ${beatPulse * 0.06 * (1 + comboIntensity)})`);
+			pg.addColorStop(1, 'transparent');
+			ctx.fillStyle = pg;
+			ctx.fillRect(0, 0, w, h);
+		}
+	}
+
+	function drawBackgroundForest(currentTime: number, combo: number, beatPulse: number) {
+		const comboIntensity = Math.min(1, combo / 50);
+		const grad = ctx.createLinearGradient(0, 0, 0, h);
+		grad.addColorStop(0, '#020a04');
+		grad.addColorStop(0.5, '#041808');
+		grad.addColorStop(1, '#031206');
+		ctx.fillStyle = grad;
+		ctx.fillRect(0, 0, w, h);
+		const gridAlpha = 0.025 + beatPulse * 0.015;
+		ctx.strokeStyle = `rgba(60, 180, 80, ${gridAlpha})`;
+		ctx.lineWidth = 1;
+		const gridSize = 60;
+		const offY = (currentTime * 20) % gridSize;
+		for (let y = -gridSize + offY; y < h; y += gridSize) {
+			ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+		}
+		for (let x = 0; x < w; x += gridSize) {
+			ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+		}
+		if (ambientParticles.length < 25 && Math.random() < 0.1) {
+			const isGold = Math.random() > 0.6;
+			ambientParticles.push({ x: Math.random() * w, y: -10, vx: (Math.random() - 0.3) * 20, vy: 15 + Math.random() * 25, size: 2 + Math.random() * 3, life: 5 + Math.random() * 5, maxLife: 5 + Math.random() * 5, hue: isGold ? 45 + Math.random() * 15 : 100 + Math.random() * 40, type: 'leaf' });
+		}
+		if (ambientParticles.length < 35 && Math.random() < 0.08) {
+			ambientParticles.push({ x: Math.random() * w, y: Math.random() * h * 0.7, vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8, size: 1.5 + Math.random() * 2, life: 2 + Math.random() * 3, maxLife: 2 + Math.random() * 3, hue: 60 + Math.random() * 40, type: 'firefly' });
+		}
+		if (beatPulse > 0.05) {
+			const pg = ctx.createRadialGradient(w / 2, h * 0.5, 0, w / 2, h * 0.5, w * 0.5);
+			pg.addColorStop(0, `hsla(130, 60%, 25%, ${beatPulse * 0.06 * (1 + comboIntensity)})`);
+			pg.addColorStop(1, 'transparent');
+			ctx.fillStyle = pg;
+			ctx.fillRect(0, 0, w, h);
+		}
+	}
+
+	let currentTimeForAmbient = 0;
+	function updateAndDrawAmbientParticles(dt: number) {
+		for (let i = ambientParticles.length - 1; i >= 0; i--) {
+			const p = ambientParticles[i];
+			p.x += p.vx * dt;
+			p.y += p.vy * dt;
+			p.life -= dt;
+			if (p.life <= 0 || p.y > h + 20 || p.y < -20 || p.x < -20 || p.x > w + 20) {
+				ambientParticles.splice(i, 1);
+				continue;
+			}
+			const fadeAlpha = Math.min(1, p.life * 2) * Math.min(1, (p.maxLife - p.life) * 2);
+			if (p.type === 'bubble') {
+				p.vx += (Math.random() - 0.5) * 2;
+				ctx.save();
+				ctx.globalAlpha = fadeAlpha * 0.4;
+				ctx.strokeStyle = `hsla(${p.hue}, 70%, 60%, 0.6)`;
+				ctx.lineWidth = 0.8;
+				ctx.beginPath();
+				ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+				ctx.stroke();
+				ctx.fillStyle = `hsla(${p.hue}, 80%, 80%, 0.3)`;
+				ctx.beginPath();
+				ctx.arc(p.x - p.size * 0.3, p.y - p.size * 0.3, p.size * 0.3, 0, Math.PI * 2);
+				ctx.fill();
+				ctx.restore();
+			} else if (p.type === 'leaf') {
+				p.vx += Math.sin(performance.now() / 1000 + p.hue) * 0.3;
+				ctx.save();
+				ctx.globalAlpha = fadeAlpha * 0.5;
+				ctx.fillStyle = `hsl(${p.hue}, 60%, 45%)`;
+				ctx.translate(p.x, p.y);
+				ctx.rotate(currentTimeForAmbient * 0.5 + p.hue);
+				ctx.beginPath();
+				ctx.moveTo(0, -p.size);
+				ctx.lineTo(p.size * 0.6, 0);
+				ctx.lineTo(0, p.size);
+				ctx.lineTo(-p.size * 0.6, 0);
+				ctx.closePath();
+				ctx.fill();
+				ctx.restore();
+			} else if (p.type === 'firefly') {
+				p.vx += (Math.random() - 0.5) * 1;
+				p.vy += (Math.random() - 0.5) * 1;
+				const blink = Math.sin(performance.now() / 1000 * 3 + p.hue * 10) * 0.5 + 0.5;
+				ctx.save();
+				ctx.globalAlpha = fadeAlpha * blink * 0.7;
+				const fg = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3);
+				fg.addColorStop(0, `hsla(${p.hue}, 90%, 70%, 0.8)`);
+				fg.addColorStop(0.5, `hsla(${p.hue}, 80%, 50%, 0.2)`);
+				fg.addColorStop(1, 'transparent');
+				ctx.fillStyle = fg;
+				ctx.fillRect(p.x - p.size * 3, p.y - p.size * 3, p.size * 6, p.size * 6);
+				ctx.restore();
+			}
+		}
+	}
+
 	function drawBackground(currentTime: number, combo: number, beatPulse: number) {
-		// combo-reactive vibrancy: shift background brightness/saturation with combo
+		currentTimeForAmbient = currentTime;
+		switch (highwayTheme) {
+			case 'space': drawBackgroundSpace(currentTime, combo, beatPulse); return;
+			case 'ocean': drawBackgroundOcean(currentTime, combo, beatPulse); return;
+			case 'cyberpunk': drawBackgroundCyberpunk(currentTime, combo, beatPulse); return;
+			case 'forest': drawBackgroundForest(currentTime, combo, beatPulse); return;
+			default: break;
+		}
+		// --- default theme (original) ---
 		const comboIntensity = Math.min(1, combo / 50);
 
 		// base gradient with theme colors
@@ -564,9 +942,9 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		// lane dividers with glow and pulse
 		for (let i = 0; i <= 3; i++) {
 			ctx.save();
-			ctx.shadowColor = theme.accent;
+			ctx.shadowColor = getThemeHitZoneGlow();
 			ctx.shadowBlur = 3 + beatPulse * 6;
-			ctx.strokeStyle = `rgba(${theme.gridColor}, ${0.12 + beatPulse * 0.1})`;
+			ctx.strokeStyle = getThemeLaneSepColor(beatPulse);
 			ctx.lineWidth = 1;
 			ctx.beginPath();
 			// draw line from top to hit zone following perspective
@@ -638,6 +1016,93 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		}
 	}
 
+	// ----- Colorblind pattern overlays -----
+	function drawColorblindPattern(cx: number, cy: number, lane: Lane, radius: number) {
+		if (!colorblindMode) return;
+		ctx.save();
+		ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+		ctx.lineWidth = 1.2;
+		if (lane === 0) {
+			// Horizontal lines (3 thin lines inside the circle)
+			for (const offset of [-0.35, 0, 0.35]) {
+				const y = cy + radius * offset;
+				const halfW = Math.sqrt(Math.max(0, radius * radius - (radius * offset) * (radius * offset)));
+				ctx.beginPath();
+				ctx.moveTo(cx - halfW * 0.8, y);
+				ctx.lineTo(cx + halfW * 0.8, y);
+				ctx.stroke();
+			}
+		} else if (lane === 1) {
+			// Cross/X pattern inside the diamond
+			const r = radius * 0.45;
+			ctx.beginPath();
+			ctx.moveTo(cx - r, cy - r);
+			ctx.lineTo(cx + r, cy + r);
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.moveTo(cx + r, cy - r);
+			ctx.lineTo(cx - r, cy + r);
+			ctx.stroke();
+		} else {
+			// Dots pattern (4 small dots inside the square)
+			const d = radius * 0.32;
+			const dotR = radius * 0.1;
+			ctx.fillStyle = 'rgba(255,255,255,0.6)';
+			for (const [dx, dy] of [[-d, -d], [d, -d], [-d, d], [d, d]]) {
+				ctx.beginPath();
+				ctx.arc(cx + dx, cy + dy, dotR, 0, Math.PI * 2);
+				ctx.fill();
+			}
+		}
+		ctx.restore();
+	}
+
+	// Draw colorblind pattern on a hold note bar segment
+	function drawColorblindBarPattern(lane: Lane, barCx: number, barTopY: number, barBotY: number, barWidth: number) {
+		if (!colorblindMode) return;
+		ctx.save();
+		ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+		ctx.fillStyle = 'rgba(255,255,255,0.3)';
+		ctx.lineWidth = 1;
+		const segH = barBotY - barTopY;
+		if (lane === 0) {
+			// Horizontal lines repeating down the bar
+			const spacing = 12;
+			for (let y = barTopY + spacing / 2; y < barBotY; y += spacing) {
+				ctx.beginPath();
+				ctx.moveTo(barCx - barWidth * 0.7, y);
+				ctx.lineTo(barCx + barWidth * 0.7, y);
+				ctx.stroke();
+			}
+		} else if (lane === 1) {
+			// X pattern repeating
+			const spacing = 16;
+			for (let y = barTopY + spacing / 2; y < barBotY; y += spacing) {
+				const r = barWidth * 0.4;
+				ctx.beginPath();
+				ctx.moveTo(barCx - r, y - r * 0.6);
+				ctx.lineTo(barCx + r, y + r * 0.6);
+				ctx.stroke();
+				ctx.beginPath();
+				ctx.moveTo(barCx + r, y - r * 0.6);
+				ctx.lineTo(barCx - r, y + r * 0.6);
+				ctx.stroke();
+			}
+		} else {
+			// Dots repeating
+			const spacing = 14;
+			const dotR = 1.5;
+			for (let y = barTopY + spacing / 2; y < barBotY; y += spacing) {
+				for (const dx of [-barWidth * 0.35, barWidth * 0.35]) {
+					ctx.beginPath();
+					ctx.arc(barCx + dx, y, dotR, 0, Math.PI * 2);
+					ctx.fill();
+				}
+			}
+		}
+		ctx.restore();
+	}
+
 	// ----- Hold note rendering -----
 	function drawHoldNote(
 		note: { t: number; lane: Lane; duration: number },
@@ -673,7 +1138,7 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			const midY = (barTopY + barBotY) / 2;
 			const { left: midLeft, lw: midLw } = getHighwayXAtY(midY);
 			const barCx = midLeft + lane * midLw + midLw / 2;
-			const barWidth = midLw * 0.35;
+			const barWidth = midLw * 0.35 * noteScale;
 
 			// main beam
 			ctx.save();
@@ -698,8 +1163,8 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 				const botHw = getHighwayXAtY(segBot);
 				const topCx = topHw.left + lane * topHw.lw + topHw.lw / 2;
 				const botCx = botHw.left + lane * botHw.lw + botHw.lw / 2;
-				const topW = topHw.lw * 0.35;
-				const botW = botHw.lw * 0.35;
+				const topW = topHw.lw * 0.35 * noteScale;
+				const botW = botHw.lw * 0.35 * noteScale;
 
 				ctx.beginPath();
 				ctx.moveTo(topCx - topW, segTop);
@@ -719,7 +1184,7 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 					const segY = barTopY + (barBotY - barTopY) * (s / segments);
 					const hw = getHighwayXAtY(segY);
 					const cx2 = hw.left + lane * hw.lw + hw.lw / 2;
-					const halfW = hw.lw * 0.35;
+					const halfW = hw.lw * 0.35 * noteScale;
 					const x = cx2 + side * halfW;
 					if (s === 0) ctx.moveTo(x, segY);
 					else ctx.lineTo(x, segY);
@@ -728,13 +1193,16 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			}
 
 			ctx.restore();
+
+			// Colorblind pattern overlay on the hold bar
+			drawColorblindBarPattern(lane, barCx, barTopY, barBotY, barWidth);
 		}
 
 		// draw head note (circle/diamond/square) at the head position
 		if (headY > -60 && headY < h + 60) {
 			const { left, lw } = getHighwayXAtY(headY);
 			const cx = left + lane * lw + lw / 2;
-			const baseNoteSize = lw * 0.5;
+			const baseNoteSize = lw * 0.5 * noteScale;
 			const notePulse = 1 + beatPulse * 0.08;
 			const noteSize = baseNoteSize * notePulse;
 			const proximity = 1 - Math.min(1, Math.abs(headY - hitZoneY) / 300);
@@ -755,6 +1223,7 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			ctx.lineWidth = 1.5;
 			ctx.stroke();
 			ctx.restore();
+			drawColorblindPattern(cx, headY, lane, noteSize / 2);
 		}
 	}
 
@@ -791,6 +1260,9 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		// starfield with parallax and streak effects
 		drawStarfield(dt, score.combo);
 
+		// ambient particles for themed backgrounds
+		updateAndDrawAmbientParticles(dt);
+
 		// shooting stars
 		maybeSpawnShootingStar(now);
 		drawShootingStars(dt);
@@ -821,7 +1293,7 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		// hit zone line with glow (perspective)
 		ctx.save();
 		const hzLeft = getHighwayXAtY(hitZoneY);
-		ctx.shadowColor = theme.accent;
+		ctx.shadowColor = getThemeHitZoneGlow();
 		ctx.shadowBlur = 8 + beatPulse * 6;
 		ctx.strokeStyle = `rgba(${theme.gridColor}, ${0.4 + beatPulse * 0.3})`;
 		ctx.lineWidth = 2;
@@ -836,7 +1308,7 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			const { left, lw } = getHighwayXAtY(hitZoneY);
 			const cx = left + lane * lw + lw / 2;
 			const pressed = lanePressed(lane as Lane);
-			const receptorSize = lw * 0.6;
+			const receptorSize = lw * 0.6 * noteScale;
 			const pulseRadius = receptorSize / 2 + (pressed ? 4 : beatPulse * 3);
 
 			// check if any hold note is being held in this lane
@@ -924,7 +1396,7 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 
 			const { left, lw } = getHighwayXAtY(y);
 			const cx = left + note.lane * lw + lw / 2;
-			const baseNoteSize = lw * 0.5;
+			const baseNoteSize = lw * 0.5 * noteScale;
 			const notePulse = 1 + beatPulse * 0.08;
 			const noteSize = baseNoteSize * notePulse;
 			const proximity = 1 - Math.min(1, Math.abs(y - hitZoneY) / 300);
@@ -953,6 +1425,9 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			drawNoteSkinShape(cx, y, note.lane, noteSize / 2);
 			applyNoteSkinFill(cx, y, note.lane, noteSize / 2, proximity);
 			ctx.restore();
+
+			// colorblind pattern overlay on tap notes
+			drawColorblindPattern(cx, y, note.lane, noteSize / 2);
 
 			// additional halo for nearby notes (skip for minimal)
 			if (proximity > 0.3 && noteSkin !== 'minimal') {
@@ -1017,9 +1492,15 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			}
 
 			ctx.fillStyle = p.color;
-			ctx.beginPath();
-			ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
-			ctx.fill();
+			if (hitEffect === 'pixel' && !p.trail) {
+				// Square pixels for pixel effect
+				const s = p.size * alpha;
+				ctx.fillRect(p.x - s, p.y - s, s * 2, s * 2);
+			} else {
+				ctx.beginPath();
+				ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+				ctx.fill();
+			}
 		}
 		ctx.globalAlpha = 1;
 
@@ -1039,9 +1520,39 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		ctx.font = 'bold 18px monospace';
 		if (score.combo >= 10) {
 			const firePhase = Math.sin(now * 8) * 0.3 + 0.7;
-			ctx.shadowColor = '#ff8800';
-			ctx.shadowBlur = 10 * firePhase;
-			ctx.fillStyle = `hsl(${40 + score.combo * 0.5}, 100%, ${55 + beatPulse * 15}%)`;
+			switch (comboColorMode) {
+				case 'rainbow': {
+					const hue = (score.combo * 7) % 360;
+					ctx.shadowColor = `hsl(${hue}, 100%, 60%)`;
+					ctx.shadowBlur = 10 * firePhase;
+					ctx.fillStyle = `hsl(${hue}, 100%, ${60 + beatPulse * 15}%)`;
+					break;
+				}
+				case 'fire': {
+					const fireIntensity = Math.min(1, (score.combo - 10) / 90);
+					const fHue = 20 - fireIntensity * 15; // orange -> red
+					const fLight = 50 + fireIntensity * 30 + beatPulse * 10; // -> white
+					ctx.shadowColor = `hsl(${fHue}, 100%, 55%)`;
+					ctx.shadowBlur = 10 * firePhase;
+					ctx.fillStyle = `hsl(${fHue}, 100%, ${Math.min(90, fLight)}%)`;
+					break;
+				}
+				case 'ice': {
+					const iceIntensity = Math.min(1, (score.combo - 10) / 90);
+					const iHue = 200 - iceIntensity * 20; // light blue -> cyan
+					const iLight = 60 + iceIntensity * 25 + beatPulse * 10; // -> white
+					ctx.shadowColor = `hsl(${iHue}, 80%, 65%)`;
+					ctx.shadowBlur = 10 * firePhase;
+					ctx.fillStyle = `hsl(${iHue}, 80%, ${Math.min(92, iLight)}%)`;
+					break;
+				}
+				default: {
+					ctx.shadowColor = '#ff8800';
+					ctx.shadowBlur = 10 * firePhase;
+					ctx.fillStyle = `hsl(${40 + score.combo * 0.5}, 100%, ${55 + beatPulse * 15}%)`;
+					break;
+				}
+			}
 		} else {
 			ctx.fillStyle = '#aaa';
 		}

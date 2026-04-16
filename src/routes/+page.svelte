@@ -365,4 +365,46 @@
 	.daily-rank { color: #ffdd00; }
 	.daily-name { color: #aaa; }
 	.daily-score { color: #4488ff; }
+
+	/* Mobile responsive */
+	@media (max-width: 768px) {
+		h1 {
+			font-size: 32px;
+			letter-spacing: 4px;
+		}
+
+		.subtitle {
+			font-size: 13px;
+		}
+
+		.keys-hint {
+			gap: 8px;
+		}
+
+		.key {
+			width: 44px;
+			height: 44px;
+			font-size: 18px;
+		}
+
+		.nav-links {
+			flex-direction: column;
+			gap: 10px;
+			align-items: center;
+		}
+
+		.play-btn {
+			font-size: 16px;
+			padding: 12px 28px;
+		}
+
+		.daily-widget {
+			max-width: 90vw;
+			padding: 12px 16px;
+		}
+
+		.content {
+			padding: 0 16px;
+		}
+	}
 </style>

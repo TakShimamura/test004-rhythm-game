@@ -32,6 +32,12 @@ export type Judgment = {
 
 export type NoteSkin = 'classic' | 'neon' | 'minimal';
 
+export type HighwayTheme = 'default' | 'space' | 'ocean' | 'cyberpunk' | 'forest';
+
+export type HitEffect = 'sparkle' | 'splash' | 'lightning' | 'pixel';
+
+export type ComboColor = 'default' | 'rainbow' | 'fire' | 'ice';
+
 export type GameConfig = {
 	perfectWindowMs: number;
 	goodWindowMs: number;
@@ -39,6 +45,11 @@ export type GameConfig = {
 	audioOffsetMs: number;
 	scrollSpeedPx: number;
 	noteSkin: NoteSkin;
+	colorblindMode: boolean;
+	noteScale: number;
+	highwayTheme: HighwayTheme;
+	hitEffect: HitEffect;
+	comboColor: ComboColor;
 };
 
 export const DEFAULT_CONFIG: GameConfig = {
@@ -48,6 +59,11 @@ export const DEFAULT_CONFIG: GameConfig = {
 	audioOffsetMs: 0,
 	scrollSpeedPx: 600,
 	noteSkin: 'classic',
+	colorblindMode: false,
+	noteScale: 1.0,
+	highwayTheme: 'default',
+	hitEffect: 'sparkle',
+	comboColor: 'default',
 };
 
 export type ScoreState = {

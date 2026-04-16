@@ -29,6 +29,12 @@
 	let noFailEnabled = $state(false);
 	let practiceEnabled = $state(false);
 
+	// Mobile detection
+	let isMobile = $state(false);
+	let touchZonePressed: [boolean, boolean, boolean] = $state([false, false, false]);
+	const TOUCH_LANE_COLORS = ['#ff4466', '#44ff66', '#4488ff'];
+	const TOUCH_LANE_LABELS = ['A', 'S', 'D'];
+
 	const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.5, 2.0];
 
 	const session = authClient.useSession();
@@ -153,9 +159,43 @@
 	}
 
 	onMount(() => {
+		isMobile = 'ontouchstart' in window || window.innerWidth < 768;
+
 		const settings = loadSettings();
 		speedMultiplier = settings.defaultSpeedMultiplier;
 		mirrorEnabled = settings.defaultMirror;
+
+		// Update touch lane labels from settings
+		if (settings.laneKeys) {
+			TOUCH_LANE_LABELS[0] = settings.laneKeys[0].toUpperCase();
+			TOUCH_LANE_LABELS[1] = settings.laneKeys[1].toUpperCase();
+			TOUCH_LANE_LABELS[2] = settings.laneKeys[2].toUpperCase();
+		}
+
+		// Track touch zone press state for visual feedback
+		function updateTouchZones(e: TouchEvent) {
+			const pressed: [boolean, boolean, boolean] = [false, false, false];
+			const screenW = window.innerWidth;
+			const third = screenW / 3;
+			for (let i = 0; i < e.touches.length; i++) {
+				const x = e.touches[i].clientX;
+				if (x < third) pressed[0] = true;
+				else if (x < third * 2) pressed[1] = true;
+				else pressed[2] = true;
+			}
+			touchZonePressed = pressed;
+		}
+
+		function clearTouchZones() {
+			touchZonePressed = [false, false, false];
+		}
+
+		if (isMobile) {
+			window.addEventListener('touchstart', updateTouchZones, { passive: true });
+			window.addEventListener('touchmove', updateTouchZones, { passive: true });
+			window.addEventListener('touchend', updateTouchZones, { passive: true });
+			window.addEventListener('touchcancel', clearTouchZones, { passive: true });
+		}
 
 		loadChart().then((chart) => {
 			chartBpm = chart.bpm;
@@ -165,7 +205,15 @@
 			initEngine(chart);
 		});
 
-		return () => engine?.destroy();
+		return () => {
+			engine?.destroy();
+			if (isMobile) {
+				window.removeEventListener('touchstart', updateTouchZones);
+				window.removeEventListener('touchmove', updateTouchZones);
+				window.removeEventListener('touchend', updateTouchZones);
+				window.removeEventListener('touchcancel', clearTouchZones);
+			}
+		};
 	});
 
 	function handleStart() {
@@ -210,11 +258,15 @@
 		<div class="overlay fade-in">
 			<h1 class="title-glow">RHYTHM GAME</h1>
 			<p class="subtitle">{chartTitle} — {chartBpm} BPM</p>
-			<div class="keys-hint">
-				<span class="key key-a pulse-key">{laneKeys[0].toUpperCase()}</span>
-				<span class="key key-s pulse-key" style="animation-delay: 0.15s">{laneKeys[1].toUpperCase()}</span>
-				<span class="key key-d pulse-key" style="animation-delay: 0.3s">{laneKeys[2].toUpperCase()}</span>
-			</div>
+			{#if isMobile}
+				<p class="mobile-hint">TAP THE ZONES</p>
+			{:else}
+				<div class="keys-hint">
+					<span class="key key-a pulse-key">{laneKeys[0].toUpperCase()}</span>
+					<span class="key key-s pulse-key" style="animation-delay: 0.15s">{laneKeys[1].toUpperCase()}</span>
+					<span class="key key-d pulse-key" style="animation-delay: 0.3s">{laneKeys[2].toUpperCase()}</span>
+				</div>
+			{/if}
 
 			<div class="mode-options">
 				<div class="speed-selector">
@@ -361,6 +413,20 @@
 
 			<a href="/play" class="start-btn glow-btn">PLAY AGAIN</a>
 			<a href="/" class="back-link">Back to Home</a>
+		</div>
+	{/if}
+
+	{#if isMobile && (gameState === 'playing' || gameState === 'waiting')}
+		<div class="touch-zones">
+			{#each [0, 1, 2] as lane}
+				<div
+					class="touch-zone"
+					class:pressed={touchZonePressed[lane]}
+					style="--zone-color: {TOUCH_LANE_COLORS[lane]}"
+				>
+					<span class="touch-zone-label">{TOUCH_LANE_LABELS[lane]}</span>
+				</div>
+			{/each}
 		</div>
 	{/if}
 </div>
@@ -830,6 +896,99 @@
 				0 0 20px rgba(255, 221, 0, 1),
 				0 0 50px rgba(255, 221, 0, 0.6),
 				0 0 80px rgba(255, 221, 0, 0.3);
+		}
+	}
+
+	/* Mobile touch zones */
+	.mobile-hint {
+		font-family: monospace;
+		font-size: 18px;
+		color: #888;
+		letter-spacing: 4px;
+		margin: 16px 0;
+		animation: pulseKey 1.5s ease-in-out infinite;
+	}
+
+	.touch-zones {
+		position: absolute;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		height: 120px;
+		display: flex;
+		z-index: 20;
+		pointer-events: none;
+	}
+
+	.touch-zone {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: color-mix(in srgb, var(--zone-color) 15%, transparent);
+		border-top: 2px solid color-mix(in srgb, var(--zone-color) 40%, transparent);
+		transition: background 0.08s;
+	}
+
+	.touch-zone:not(:last-child) {
+		border-right: 1px solid rgba(255, 255, 255, 0.08);
+	}
+
+	.touch-zone.pressed {
+		background: color-mix(in srgb, var(--zone-color) 40%, transparent);
+	}
+
+	.touch-zone-label {
+		font-family: monospace;
+		font-size: 28px;
+		font-weight: bold;
+		color: var(--zone-color);
+		opacity: 0.6;
+		text-shadow: 0 0 10px var(--zone-color);
+	}
+
+	.touch-zone.pressed .touch-zone-label {
+		opacity: 1;
+		text-shadow: 0 0 20px var(--zone-color), 0 0 40px var(--zone-color);
+	}
+
+	/* Mobile responsive for play page */
+	@media (max-width: 768px) {
+		h1 {
+			font-size: 28px;
+			letter-spacing: 4px;
+		}
+
+		h2 {
+			font-size: 24px;
+		}
+
+		.subtitle {
+			font-size: 13px;
+		}
+
+		.results-grid {
+			grid-template-columns: 1fr 1fr;
+			gap: 8px 16px;
+		}
+
+		.leaderboard {
+			width: 90vw;
+			max-width: 320px;
+		}
+
+		.mode-options {
+			width: 90vw;
+		}
+
+		.speed-buttons {
+			flex-wrap: wrap;
+			justify-content: center;
+		}
+
+		.toggle-row {
+			flex-wrap: wrap;
+			justify-content: center;
 		}
 	}
 </style>

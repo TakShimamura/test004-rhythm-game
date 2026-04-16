@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { loadSettings, saveSettings, type UserSettings } from '$lib/game/settings.js';
-	import type { NoteSkin } from '$lib/game/types.js';
+	import type { NoteSkin, HighwayTheme, HitEffect, ComboColor } from '$lib/game/types.js';
 
 	let settings: UserSettings = $state({
 		laneKeys: ['a', 's', 'd'],
@@ -10,6 +10,11 @@
 		defaultSpeedMultiplier: 1.0,
 		defaultMirror: false,
 		noteSkin: 'classic' as NoteSkin,
+		colorblindMode: false,
+		noteScale: 1.0,
+		highwayTheme: 'default' as HighwayTheme,
+		hitEffect: 'sparkle' as HitEffect,
+		comboColor: 'default' as ComboColor,
 	});
 
 	const NOTE_SKINS: { value: NoteSkin; label: string; desc: string }[] = [
@@ -18,6 +23,28 @@
 		{ value: 'minimal', label: 'Minimal', desc: 'Simple small dots, very clean' },
 	];
 	const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.5, 2.0];
+
+	const HIGHWAY_THEMES: { value: HighwayTheme; label: string; desc: string }[] = [
+		{ value: 'default', label: 'Default', desc: 'Dark gradient with grid lines and starfield' },
+		{ value: 'space', label: 'Space', desc: 'Deep black with nebula clouds and planet silhouette' },
+		{ value: 'ocean', label: 'Ocean', desc: 'Dark blue with wave lines, bubbles, and bioluminescence' },
+		{ value: 'cyberpunk', label: 'Cyberpunk', desc: 'Pink/cyan hex grid, glitch lines, neon skyline' },
+		{ value: 'forest', label: 'Forest', desc: 'Dark green with floating leaves and firefly lights' },
+	];
+
+	const HIT_EFFECTS: { value: HitEffect; label: string; desc: string }[] = [
+		{ value: 'sparkle', label: 'Sparkle', desc: 'Classic radial burst with trails on perfects' },
+		{ value: 'splash', label: 'Splash', desc: 'Wave-like arc pattern with blue tones and gravity' },
+		{ value: 'lightning', label: 'Lightning', desc: 'Fast bright lines radiating outward, quick decay' },
+		{ value: 'pixel', label: 'Pixel', desc: 'Grid-explosion of small square particles' },
+	];
+
+	const COMBO_COLORS: { value: ComboColor; label: string; desc: string }[] = [
+		{ value: 'default', label: 'Default', desc: 'Yellow fire glow at 10+ combo' },
+		{ value: 'rainbow', label: 'Rainbow', desc: 'Cycles through hues based on combo count' },
+		{ value: 'fire', label: 'Fire', desc: 'Orange to red to white as combo grows' },
+		{ value: 'ice', label: 'Ice', desc: 'Light blue to cyan to white as combo grows' },
+	];
 
 	let listeningLane: number | null = $state(null);
 	let saved = $state(false);
@@ -56,6 +83,11 @@
 			defaultSpeedMultiplier: 1.0,
 			defaultMirror: false,
 			noteSkin: 'classic',
+			colorblindMode: false,
+			noteScale: 1.0,
+			highwayTheme: 'default',
+			hitEffect: 'sparkle',
+			comboColor: 'default',
 		};
 		saveSettings(settings);
 		saved = true;
@@ -167,6 +199,84 @@
 		>
 			{settings.defaultMirror ? 'ON' : 'OFF'}
 		</button>
+	</section>
+
+	<section>
+		<h2>COLORBLIND MODE</h2>
+		<p class="desc">Adds distinct patterns inside notes and uses a colorblind-safe color palette.</p>
+		<button
+			class="mirror-toggle"
+			class:active={settings.colorblindMode}
+			onclick={() => { settings.colorblindMode = !settings.colorblindMode; }}
+		>
+			{settings.colorblindMode ? 'ON' : 'OFF'}
+		</button>
+	</section>
+
+	<section>
+		<h2>NOTE SIZE</h2>
+		<p class="desc">Scale note size up or down. Larger notes are easier to see.</p>
+		<div class="slider-row">
+			<input
+				type="range"
+				min="0.5"
+				max="2.0"
+				step="0.1"
+				bind:value={settings.noteScale}
+			/>
+			<span class="value">{settings.noteScale.toFixed(1)}x</span>
+		</div>
+	</section>
+
+	<section>
+		<h2>HIGHWAY THEME</h2>
+		<p class="desc">Change the background visuals and atmosphere.</p>
+		<div class="skin-options">
+			{#each HIGHWAY_THEMES as ht}
+				<button
+					class="skin-btn"
+					class:active={settings.highwayTheme === ht.value}
+					onclick={() => { settings.highwayTheme = ht.value; }}
+				>
+					<span class="skin-label">{ht.label}</span>
+					<span class="skin-desc">{ht.desc}</span>
+				</button>
+			{/each}
+		</div>
+	</section>
+
+	<section>
+		<h2>HIT EFFECT</h2>
+		<p class="desc">Particle style when you hit a note.</p>
+		<div class="skin-options">
+			{#each HIT_EFFECTS as he}
+				<button
+					class="skin-btn"
+					class:active={settings.hitEffect === he.value}
+					onclick={() => { settings.hitEffect = he.value; }}
+				>
+					<span class="skin-label">{he.label}</span>
+					<span class="skin-desc">{he.desc}</span>
+				</button>
+			{/each}
+		</div>
+	</section>
+
+	<section>
+		<h2>COMBO COLOR</h2>
+		<p class="desc">Color scheme for combo counter and streak fire.</p>
+		<div class="skin-options">
+			{#each COMBO_COLORS as cc}
+				<button
+					class="skin-btn"
+					class:active={settings.comboColor === cc.value}
+					onclick={() => { settings.comboColor = cc.value; }}
+				>
+					<span class="skin-label">{cc.label}</span>
+					<span class="skin-desc">{cc.desc}</span>
+				</button>
+			{/each}
+		</div>
 	</section>
 
 	<div class="actions">
@@ -416,5 +526,35 @@
 		color: #ffdd00;
 		background: rgba(255, 221, 0, 0.1);
 		box-shadow: 0 0 8px rgba(255, 221, 0, 0.15);
+	}
+
+	/* Mobile responsive */
+	@media (max-width: 768px) {
+		.settings-page {
+			padding: 24px 16px;
+		}
+
+		h1 {
+			font-size: 28px;
+		}
+
+		section {
+			max-width: 100%;
+		}
+
+		.speed-buttons {
+			flex-wrap: wrap;
+		}
+
+		.actions {
+			flex-direction: column;
+			width: 100%;
+			max-width: 400px;
+		}
+
+		.save-btn, .reset-btn {
+			width: 100%;
+			text-align: center;
+		}
 	}
 </style>
