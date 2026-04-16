@@ -47,30 +47,66 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 - [x] 10 songs with synth instruments (pad, arp, bass, drums, lead)
 
 ## P7 — Player profile + progression
-- [ ] Player profile page (stats, play history, accuracy trends)
-- [ ] XP system: earn XP per play, level up
-- [ ] Achievement badges (first S rank, 100 combo, all songs cleared, etc.)
-- [ ] Personal best tracking per chart with delta display
-- [ ] Play count + time played stats
+- [x] Player profile page (stats, play history, accuracy trends)
+- [x] XP system: earn XP per play, level up
+- [x] Achievement badges (first S rank, 100 combo, all songs cleared, etc.)
+- [x] Personal best tracking per chart with delta display
+- [x] Play count + time played stats
 
 ## P8 — Social + competitive
-- [ ] Global leaderboard page (all charts, top players)
-- [ ] Friend system (follow other players)
-- [ ] Activity feed (recent scores from followed players)
-- [ ] Chart comments / ratings (1-5 stars)
-- [ ] Daily challenge: random chart, one attempt, ranked
+- [x] Global leaderboard page (all charts, top players)
+- [x] Friend system (follow other players)
+- [x] Activity feed (recent scores from followed players)
+- [x] Chart comments / ratings (1-5 stars)
+- [x] Daily challenge: random chart, one attempt, ranked
 
 ## P9 — Gameplay modes
-- [ ] Practice mode: slow down speed, loop sections, auto-play visualization
-- [ ] Endless mode: procedurally generated chart that gets harder over time
-- [ ] Mirror mode: flip lanes L↔R
-- [ ] No-fail mode: can't die, for learning charts
-- [ ] Speed mods: 0.5x to 2.0x playback speed
+- [x] Practice mode: timing delta HUD, R to restart
+- [x] Endless mode: procedurally generated chart that gets harder over time
+- [x] Mirror mode: flip lanes L↔R
+- [x] No-fail mode: can't die, for learning charts
+- [x] Speed mods: 0.5x to 2.0x visual speed
 
 ## P10 — Polish + juice
-- [ ] Screen shake on miss
-- [ ] Full-combo celebration (special animation + sound)
-- [ ] Streak fire: visual fire trail when combo > 50
-- [ ] Note skins (different visual themes)
-- [ ] Sound effects pack (different hit sounds per skin)
-- [ ] Dark/light theme toggle
+- [x] Screen shake on miss
+- [x] Full-combo celebration (special animation + sound)
+- [x] Streak fire: visual fire trail when combo > 50
+- [x] Note skins (classic, neon, minimal)
+- [x] Sound effects variety (hit harmonics, miss buzz, combo chimes)
+- [x] Settings: note skin selector, speed/mirror defaults
+
+## P11 — Multiplayer foundation
+- [ ] WebSocket server for real-time play
+- [ ] 1v1 mode: two players play the same chart simultaneously
+- [ ] Live score comparison HUD (your score vs opponent)
+- [ ] Matchmaking lobby: quick match or invite by link
+- [ ] Post-match results comparison screen
+
+## P12 — Advanced chart editor
+- [ ] Waveform visualization with zoom/scroll
+- [ ] Snap-to-beat grid with subdivision options (1/4, 1/8, 1/16)
+- [ ] Copy/paste note sections
+- [ ] Playback preview in editor (hear + see notes while editing)
+- [ ] Hold note placement (click-drag for duration)
+- [ ] Undo/redo stack
+- [ ] Import/export chart as JSON file
+
+## P13 — Audio analysis
+- [ ] BPM auto-detection from uploaded audio
+- [ ] Onset detection: auto-generate starter chart from audio peaks
+- [ ] Beat grid alignment visualization
+- [ ] Spectral analysis for lane assignment (bass=left, mid=center, treble=right)
+
+## P14 — Cosmetics + customization
+- [ ] Unlockable highway themes (space, ocean, cyberpunk, forest)
+- [ ] Custom combo colors
+- [ ] Hit effect styles (sparkle, splash, lightning, pixel)
+- [ ] Profile banners and borders (earned via achievements)
+- [ ] Note trail customization (rainbow, flame, ice)
+
+## P15 — Mobile + accessibility
+- [ ] Touch input support (tap lanes on mobile)
+- [ ] Responsive layout for mobile browsers
+- [ ] Colorblind mode (patterns + shapes instead of colors only)
+- [ ] Audio-only mode guidance for visually impaired
+- [ ] Adjustable note size and lane width

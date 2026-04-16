@@ -10,6 +10,7 @@
 	let audioFile: File | null = $state(null);
 	let error = $state('');
 	let uploading = $state(false);
+	let uploadedSongId = $state('');
 
 	function handleFileChange(e: Event) {
 		const input = e.target as HTMLInputElement;
@@ -40,7 +41,7 @@
 			}
 
 			const song = await res.json();
-			goto(`/editor/new?songId=${song.id}`);
+			uploadedSongId = song.id;
 		} finally {
 			uploading = false;
 		}
@@ -55,32 +56,47 @@
 	{:else}
 		<h1>UPLOAD SONG</h1>
 
-		<form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
-			<label>
-				<span>Title</span>
-				<input type="text" bind:value={title} required />
-			</label>
-			<label>
-				<span>Artist</span>
-				<input type="text" bind:value={artist} required />
-			</label>
-			<label>
-				<span>BPM</span>
-				<input type="number" bind:value={bpm} min="40" max="300" required />
-			</label>
-			<label>
-				<span>Audio File</span>
-				<input type="file" accept="audio/*" onchange={handleFileChange} required />
-			</label>
+		{#if uploadedSongId}
+			<div class="success-choices">
+				<h2>UPLOAD COMPLETE</h2>
+				<p class="hint">How would you like to create a chart?</p>
+				<div class="choice-buttons">
+					<a href="/editor/new?songId={uploadedSongId}" class="choice-btn manual">
+						CREATE CHART MANUALLY
+					</a>
+					<a href="/editor/auto?songId={uploadedSongId}" class="choice-btn auto">
+						AUTO-GENERATE CHART
+					</a>
+				</div>
+			</div>
+		{:else}
+			<form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+				<label>
+					<span>Title</span>
+					<input type="text" bind:value={title} required />
+				</label>
+				<label>
+					<span>Artist</span>
+					<input type="text" bind:value={artist} required />
+				</label>
+				<label>
+					<span>BPM</span>
+					<input type="number" bind:value={bpm} min="40" max="300" required />
+				</label>
+				<label>
+					<span>Audio File</span>
+					<input type="file" accept="audio/*" onchange={handleFileChange} required />
+				</label>
 
-			{#if error}
-				<p class="error">{error}</p>
-			{/if}
+				{#if error}
+					<p class="error">{error}</p>
+				{/if}
 
-			<button type="submit" disabled={uploading}>
-				{uploading ? 'UPLOADING...' : 'UPLOAD & CREATE CHART'}
-			</button>
-		</form>
+				<button type="submit" disabled={uploading}>
+					{uploading ? 'UPLOADING...' : 'UPLOAD'}
+				</button>
+			</form>
+		{/if}
 	{/if}
 
 	<a href="/songs" class="back-link">&larr; Back to Songs</a>
@@ -194,4 +210,49 @@
 	}
 
 	.back-link:hover { color: #888; }
+
+	.success-choices {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 16px;
+	}
+
+	.success-choices h2 {
+		font-size: 24px;
+		letter-spacing: 4px;
+		color: #44ff66;
+		margin: 0;
+	}
+
+	.choice-buttons {
+		display: flex;
+		gap: 16px;
+		flex-wrap: wrap;
+		justify-content: center;
+	}
+
+	.choice-btn {
+		font-family: monospace;
+		font-size: 14px;
+		padding: 14px 28px;
+		background: transparent;
+		text-decoration: none;
+		letter-spacing: 2px;
+		text-align: center;
+	}
+
+	.choice-btn.manual {
+		border: 2px solid #4488ff;
+		color: #4488ff;
+	}
+
+	.choice-btn.manual:hover { background: #4488ff20; }
+
+	.choice-btn.auto {
+		border: 2px solid #ffaa22;
+		color: #ffaa22;
+	}
+
+	.choice-btn.auto:hover { background: #ffaa2220; }
 </style>
