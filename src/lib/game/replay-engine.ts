@@ -298,6 +298,9 @@ export function createReplayEngine(
 		getReplayData() {
 			return replayData;
 		},
+		getHealth() {
+			return 1;
+		},
 		setPlaybackSpeed(speed: number) {
 			playbackSpeed = speed;
 			// Adjust audio playback rate if the source supports it

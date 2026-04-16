@@ -3,8 +3,9 @@
 	import { authClient } from '$lib/auth-client.js';
 	import Tooltip from '$lib/components/Tooltip.svelte';
 	import { createAudioPreview } from '$lib/game/audio-preview.js';
+	import { getDifficultyColor } from '$lib/game/difficulty-calc.js';
 
-	type SongChart = { id: string; difficulty: string };
+	type SongChart = { id: string; difficulty: string; stars?: number };
 	type Song = {
 		id: string;
 		title: string;
@@ -105,6 +106,17 @@
 		const s = Math.floor(ms / 1000);
 		return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 	}
+
+	/** Approximate star rating from difficulty label */
+	function approxStars(difficulty: string, stars?: number): number {
+		if (stars !== undefined) return stars;
+		switch (difficulty.toLowerCase()) {
+			case 'easy': return 3;
+			case 'normal': return 5.5;
+			case 'hard': return 8;
+			default: return 5;
+		}
+	}
 </script>
 
 <div class="songs-page" style="position: relative;">
@@ -144,8 +156,10 @@
 					</div>
 					<div class="chart-links">
 						{#each song.charts as chart}
+							{@const stars = approxStars(chart.difficulty, chart.stars)}
 							<a href="/play?chart={chart.id}" class="chart-link">
 								{chart.difficulty}
+								<span class="difficulty-stars" style="color: {getDifficultyColor(stars)}">&#9733; {stars.toFixed(1)}</span>
 								{#if ratings[chart.id]?.average !== undefined && ratings[chart.id]?.average !== null}
 									<span class="chart-rating" title="{ratings[chart.id].average?.toFixed(1)} ({ratings[chart.id].count} ratings)">
 										{ratings[chart.id].average?.toFixed(1)} &#9733;
@@ -322,6 +336,12 @@
 	}
 
 	.back-link:hover { color: #888; }
+
+	.difficulty-stars {
+		font-size: 10px;
+		margin-left: 4px;
+		font-weight: bold;
+	}
 
 	.chart-rating {
 		color: #ffdd00;

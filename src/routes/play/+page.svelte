@@ -8,7 +8,9 @@
 	import { loadSettings, saveSettings, settingsToConfig } from '$lib/game/settings.js';
 	import { authClient } from '$lib/auth-client.js';
 	import { generateStatsCard, downloadStatsCard } from '$lib/game/stats-card.js';
-	import type { Chart, GameState, GameModeConfig, ScoreState } from '$lib/game/types.js';
+	import type { Chart, ChartModifier, GameState, GameModeConfig, ScoreState } from '$lib/game/types.js';
+	import { calculateDifficultyStars, getDifficultyLabel, getDifficultyColor } from '$lib/game/difficulty-calc.js';
+	import { suggestDifficulty } from '$lib/game/auto-difficulty.js';
 
 	let canvas: HTMLCanvasElement;
 	let shareCanvas: HTMLCanvasElement | undefined = $state(undefined);
@@ -39,6 +41,18 @@
 	let mirrorEnabled = $state(false);
 	let noFailEnabled = $state(false);
 	let practiceEnabled = $state(false);
+
+	// Chart modifiers (visual-only)
+	let hiddenEnabled = $state(false);
+	let suddenEnabled = $state(false);
+	let flashlightEnabled = $state(false);
+
+	// Difficulty and health
+	let chartStars = $state(0);
+	let chartDiffLabel = $state('');
+	let chartDiffColor = $state('#888');
+	let currentHealth = $state(1);
+	let suggestedStars: number | null = $state(null);
 
 	// Mobile detection
 	let isMobile = $state(false);
@@ -177,12 +191,18 @@
 	}
 
 	function buildModeConfig(): GameModeConfig {
+		const modifiers: ChartModifier[] = [];
+		if (hiddenEnabled) modifiers.push('hidden');
+		if (suddenEnabled) modifiers.push('sudden');
+		if (flashlightEnabled) modifiers.push('flashlight');
+
 		return {
 			mode: practiceEnabled ? 'practice' : noFailEnabled ? 'nofail' : mirrorEnabled ? 'mirror' : 'normal',
 			speedMultiplier,
 			mirror: mirrorEnabled,
 			noFail: noFailEnabled,
 			practice: practiceEnabled,
+			modifiers,
 		};
 	}
 
@@ -197,6 +217,12 @@
 		replayId = null;
 		replayLinkCopied = false;
 		gameState = 'waiting';
+		currentHealth = 1;
+
+		// Calculate difficulty stars
+		chartStars = calculateDifficultyStars(chart.notes, chart.bpm);
+		chartDiffLabel = getDifficultyLabel(chartStars);
+		chartDiffColor = getDifficultyColor(chartStars);
 
 		const settings = loadSettings();
 		const config = settingsToConfig(settings);
@@ -213,6 +239,9 @@
 			onScoreChange(s) {
 				score = s;
 				lastDeltaMs = engine?.getLastDeltaMs() ?? null;
+			},
+			onHealthChange(h) {
+				currentHealth = h;
 			},
 		}, mc);
 	}
@@ -259,12 +288,29 @@
 			window.addEventListener('touchcancel', clearTouchZones, { passive: true });
 		}
 
-		loadChart().then((chart) => {
+		loadChart().then(async (chart) => {
 			chartBpm = chart.bpm;
 			activeChartId = chart.id;
 			loading = false;
 			loadedChart = chart;
 			initEngine(chart);
+
+			// Load difficulty suggestion from recent scores
+			if ($session.data) {
+				try {
+					const res = await fetch(`/api/charts/${chart.id}/leaderboard`);
+					if (res.ok) {
+						const lb: { accuracy: number }[] = await res.json();
+						if (lb.length > 0) {
+							const recentScores = lb.slice(0, 10).map((s) => ({
+								accuracy: s.accuracy,
+								stars: chartStars,
+							}));
+							suggestedStars = suggestDifficulty(recentScores);
+						}
+					}
+				} catch { /* ignore suggestion errors */ }
+			}
 		});
 
 		return () => {
@@ -305,6 +351,10 @@
 		// Practice mode: R to restart
 		if (e.key === 'r' && practiceEnabled && (gameState === 'playing' || gameState === 'paused')) {
 			engine?.restart();
+		}
+		// R to retry on failed screen
+		if (e.key === 'r' && gameState === 'failed') {
+			handleStart();
 		}
 	}
 
@@ -349,6 +399,15 @@
 		<div class="overlay fade-in">
 			<h1 class="title-glow">RHYTHM GAME</h1>
 			<p class="subtitle">{chartTitle} — {chartBpm} BPM</p>
+			{#if chartStars > 0}
+				<div class="difficulty-display">
+					<span class="diff-stars" style="color: {chartDiffColor}">&#9733; {chartStars.toFixed(1)}</span>
+					<span class="diff-label" style="color: {chartDiffColor}">{chartDiffLabel}</span>
+					{#if suggestedStars !== null && Math.abs(suggestedStars - chartStars) > 1}
+						<span class="suggested-badge">SUGGESTED: &#9733; {suggestedStars.toFixed(1)}</span>
+					{/if}
+				</div>
+			{/if}
 			{#if isMobile}
 				<p class="mobile-hint">TAP THE ZONES</p>
 			{:else}
@@ -397,6 +456,29 @@
 						PRACTICE
 					</button>
 				</div>
+				<div class="toggle-row">
+					<button
+						class="toggle-btn modifier-btn"
+						class:active={hiddenEnabled}
+						onclick={() => { hiddenEnabled = !hiddenEnabled; }}
+					>
+						HIDDEN
+					</button>
+					<button
+						class="toggle-btn modifier-btn"
+						class:active={suddenEnabled}
+						onclick={() => { suddenEnabled = !suddenEnabled; }}
+					>
+						SUDDEN
+					</button>
+					<button
+						class="toggle-btn modifier-btn"
+						class:active={flashlightEnabled}
+						onclick={() => { flashlightEnabled = !flashlightEnabled; }}
+					>
+						FLASHLIGHT
+					</button>
+				</div>
 			</div>
 
 			<button class="start-btn glow-btn" onclick={handleStart}>
@@ -419,6 +501,15 @@
 			{/if}
 			{#if speedMultiplier !== 1.0}
 				<span class="hud-tag speed-tag">{speedMultiplier}x</span>
+			{/if}
+			{#if hiddenEnabled}
+				<span class="hud-tag hidden-tag">HIDDEN</span>
+			{/if}
+			{#if suddenEnabled}
+				<span class="hud-tag sudden-tag">SUDDEN</span>
+			{/if}
+			{#if flashlightEnabled}
+				<span class="hud-tag flashlight-tag">FLASHLIGHT</span>
 			{/if}
 			{#if practiceEnabled}
 				<span class="hud-tag practice-tag">PRACTICE</span>
@@ -530,6 +621,45 @@
 				</div>
 			{/if}
 
+			<a href="/" class="back-link">Back to Home</a>
+		</div>
+	{/if}
+
+	{#if gameState === 'failed'}
+		{@const acc = accuracy(score)}
+		<div class="overlay failed-overlay scale-in">
+			<h1 class="failed-title">FAILED</h1>
+			<div class="failed-health-empty"></div>
+			<div class="results-grid">
+				<div class="result-item">
+					<span class="result-label">Score</span>
+					<span class="result-value">{score.score}</span>
+				</div>
+				<div class="result-item">
+					<span class="result-label">Max Combo</span>
+					<span class="result-value">{score.maxCombo}x</span>
+				</div>
+				<div class="result-item">
+					<span class="result-label">Accuracy</span>
+					<span class="result-value">{(acc * 100).toFixed(1)}%</span>
+				</div>
+				<div class="result-item">
+					<span class="result-label perfect">Perfect</span>
+					<span class="result-value">{score.perfects}</span>
+				</div>
+				<div class="result-item">
+					<span class="result-label good">Good</span>
+					<span class="result-value">{score.goods}</span>
+				</div>
+				<div class="result-item">
+					<span class="result-label miss">Miss</span>
+					<span class="result-value">{score.misses}</span>
+				</div>
+			</div>
+			<div class="failed-actions">
+				<button class="start-btn glow-btn" onclick={handleStart}>RETRY</button>
+				<a href="/songs" class="quit-btn">QUIT</a>
+			</div>
 			<a href="/" class="back-link">Back to Home</a>
 		</div>
 	{/if}
@@ -1019,6 +1149,130 @@
 		color: #ffdd00;
 		background: rgba(255, 221, 0, 0.1);
 		box-shadow: 0 0 8px rgba(255, 221, 0, 0.15);
+	}
+
+	.modifier-btn.active {
+		border-color: #ff8844;
+		color: #ff8844;
+		background: rgba(255, 136, 68, 0.1);
+		box-shadow: 0 0 8px rgba(255, 136, 68, 0.15);
+	}
+
+	/* Difficulty display */
+	.difficulty-display {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin: 4px 0;
+	}
+
+	.diff-stars {
+		font-family: monospace;
+		font-size: 20px;
+		font-weight: bold;
+	}
+
+	.diff-label {
+		font-family: monospace;
+		font-size: 14px;
+		letter-spacing: 2px;
+		text-transform: uppercase;
+	}
+
+	.suggested-badge {
+		font-family: monospace;
+		font-size: 10px;
+		padding: 2px 8px;
+		background: rgba(68, 255, 102, 0.12);
+		border: 1px solid rgba(68, 255, 102, 0.3);
+		color: #44ff66;
+		letter-spacing: 1px;
+		border-radius: 3px;
+	}
+
+	/* Failed screen */
+	.failed-overlay {
+		background: rgba(20, 5, 5, 0.95);
+	}
+
+	.failed-title {
+		font-family: monospace;
+		font-size: 64px;
+		font-weight: bold;
+		letter-spacing: 8px;
+		color: #ff2244;
+		text-shadow:
+			0 0 20px rgba(255, 34, 68, 0.8),
+			0 0 40px rgba(255, 34, 68, 0.4),
+			0 0 80px rgba(255, 34, 68, 0.2);
+		animation: failedPulse 1.5s ease-in-out infinite;
+	}
+
+	@keyframes failedPulse {
+		0%, 100% {
+			text-shadow:
+				0 0 20px rgba(255, 34, 68, 0.8),
+				0 0 40px rgba(255, 34, 68, 0.4);
+		}
+		50% {
+			text-shadow:
+				0 0 30px rgba(255, 34, 68, 1),
+				0 0 60px rgba(255, 34, 68, 0.6),
+				0 0 100px rgba(255, 34, 68, 0.3);
+		}
+	}
+
+	.failed-health-empty {
+		width: 200px;
+		height: 6px;
+		background: rgba(255, 34, 68, 0.15);
+		border: 1px solid rgba(255, 34, 68, 0.3);
+		margin: 4px 0 8px;
+	}
+
+	.failed-actions {
+		display: flex;
+		gap: 12px;
+		align-items: center;
+		margin-top: 8px;
+	}
+
+	.quit-btn {
+		font-family: monospace;
+		font-size: 14px;
+		padding: 12px 24px;
+		background: transparent;
+		border: 2px solid #666;
+		color: #888;
+		cursor: pointer;
+		letter-spacing: 2px;
+		text-decoration: none;
+		transition: background 0.2s;
+	}
+
+	.quit-btn:hover {
+		border-color: #888;
+		color: #aaa;
+		background: rgba(136, 136, 136, 0.1);
+	}
+
+	/* Modifier HUD tags */
+	.hidden-tag {
+		color: #ff8844;
+		background: rgba(255, 136, 68, 0.15);
+		border: 1px solid rgba(255, 136, 68, 0.3);
+	}
+
+	.sudden-tag {
+		color: #44ddff;
+		background: rgba(68, 221, 255, 0.15);
+		border: 1px solid rgba(68, 221, 255, 0.3);
+	}
+
+	.flashlight-tag {
+		color: #ffdd00;
+		background: rgba(255, 221, 0, 0.15);
+		border: 1px solid rgba(255, 221, 0, 0.3);
 	}
 
 	/* Mode HUD */

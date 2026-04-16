@@ -75,6 +75,7 @@
 			mirror: settings.defaultMirror,
 			noFail: true, // endless always has no-fail
 			practice: false,
+			modifiers: [],
 		};
 
 		engine = createEngine(canvas, endlessChart, config, {

@@ -93,7 +93,9 @@ export function emptyScore(): ScoreState {
 	return { score: 0, combo: 0, maxCombo: 0, perfects: 0, goods: 0, misses: 0 };
 }
 
-export type GameState = 'waiting' | 'playing' | 'paused' | 'results';
+export type GameState = 'waiting' | 'playing' | 'paused' | 'results' | 'failed';
+
+export type ChartModifier = 'hidden' | 'sudden' | 'flashlight';
 
 export type GameMode = 'normal' | 'practice' | 'endless' | 'mirror' | 'nofail';
 
@@ -103,6 +105,7 @@ export type GameModeConfig = {
 	mirror: boolean; // flip lanes
 	noFail: boolean; // can't fail
 	practice: boolean; // practice features enabled
+	modifiers: ChartModifier[]; // visual modifiers (hidden, sudden, flashlight)
 };
 
 export const DEFAULT_MODE_CONFIG: GameModeConfig = {
@@ -111,6 +114,7 @@ export const DEFAULT_MODE_CONFIG: GameModeConfig = {
 	mirror: false,
 	noFail: false,
 	practice: false,
+	modifiers: [],
 };
 
 export type ReplayEvent = {

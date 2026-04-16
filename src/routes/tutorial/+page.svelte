@@ -52,6 +52,7 @@
 			mirror: false,
 			noFail: true,
 			practice: false,
+			modifiers: [],
 		});
 	}
 

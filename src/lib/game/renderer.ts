@@ -1,4 +1,4 @@
-import type { Chart, GameConfig, Lane, MusicStyle, NoteSkin, ScoreState, JudgmentGrade, HighwayTheme, HitEffect, ComboColor } from './types.js';
+import type { Chart, ChartModifier, GameConfig, Lane, MusicStyle, NoteSkin, ScoreState, JudgmentGrade, HighwayTheme, HitEffect, ComboColor } from './types.js';
 
 const LANE_COLORS_DEFAULT = ['#ff4466', '#44ff66', '#4488ff'] as const;
 const LANE_GLOW_COLORS_DEFAULT = ['rgba(255,68,102,', 'rgba(68,255,102,', 'rgba(68,136,255,'] as const;
@@ -82,6 +82,8 @@ export type Renderer = {
 		hitNotes: Set<number>,
 		flashes: JudgmentFlash[],
 		ghost?: GhostDrawState,
+		health?: number,
+		modifiers?: ChartModifier[],
 	) => void;
 	spawnParticles: (lane: Lane, grade: JudgmentGrade) => void;
 	/** Burst particles along a hold note bar when released/completed. */
@@ -186,6 +188,377 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 	// ----- Highway theme ambient particle state -----
 	type AmbientParticle = { x: number; y: number; vx: number; vy: number; size: number; life: number; maxLife: number; hue: number; type: string };
 	const ambientParticles: AmbientParticle[] = [];
+
+	// ===== P22: Visual storytelling + stage effects =====
+
+	// ----- P22.1: Song section detection -----
+	type SongSectionType = 'intro' | 'verse' | 'buildup' | 'chorus' | 'bridge' | 'outro';
+	type SongSection = { startTime: number; endTime: number; type: SongSectionType; density: number };
+	type SectionVisualState = {
+		brightness: number;      // 0-1, multiplier on background brightness
+		particleSpeed: number;   // multiplier on starfield/particle speed
+		warmShift: number;       // -1 (cool) to 1 (warm) hue shift
+		vibrancy: number;        // 0-1, multiplier on glow/color saturation
+		laneSepBrightness: number; // multiplier on lane separator alpha
+	};
+
+	const SECTION_VISUAL_STATES: Record<SongSectionType, SectionVisualState> = {
+		intro:   { brightness: 0.5, particleSpeed: 0.5, warmShift: -0.3, vibrancy: 0.3, laneSepBrightness: 0.5 },
+		verse:   { brightness: 0.75, particleSpeed: 1.0, warmShift: 0.0, vibrancy: 0.6, laneSepBrightness: 0.8 },
+		buildup: { brightness: 0.85, particleSpeed: 1.3, warmShift: 0.4, vibrancy: 0.8, laneSepBrightness: 1.0 },
+		chorus:  { brightness: 1.0, particleSpeed: 1.8, warmShift: 0.6, vibrancy: 1.0, laneSepBrightness: 1.2 },
+		bridge:  { brightness: 0.6, particleSpeed: 0.7, warmShift: -0.5, vibrancy: 0.4, laneSepBrightness: 0.6 },
+		outro:   { brightness: 0.2, particleSpeed: 0.3, warmShift: -0.2, vibrancy: 0.15, laneSepBrightness: 0.3 },
+	};
+
+	function analyzeSongSections(): SongSection[] {
+		const notes = chart.notes;
+		if (notes.length === 0) return [];
+
+		const lastNoteTime = notes[notes.length - 1].t;
+		const windowSize = 10; // seconds
+		const windowCount = Math.max(1, Math.ceil(lastNoteTime / windowSize));
+
+		// Count notes per window
+		const windowCounts: number[] = new Array(windowCount).fill(0);
+		for (const note of notes) {
+			const idx = Math.min(windowCount - 1, Math.floor(note.t / windowSize));
+			windowCounts[idx]++;
+		}
+
+		// Determine density thresholds
+		const maxCount = Math.max(...windowCounts, 1);
+		const densityLevels: ('sparse' | 'normal' | 'dense')[] = windowCounts.map(c => {
+			const ratio = c / maxCount;
+			if (ratio < 0.3) return 'sparse';
+			if (ratio > 0.7) return 'dense';
+			return 'normal';
+		});
+
+		// Map to section types using context
+		const sections: SongSection[] = [];
+		let seenDense = false;
+		let prevWasDense = false;
+
+		for (let i = 0; i < windowCount; i++) {
+			const start = i * windowSize;
+			const end = Math.min((i + 1) * windowSize, lastNoteTime + 1);
+			const dl = densityLevels[i];
+			let type: SongSectionType;
+
+			// Check if density is increasing (buildup detection)
+			const isIncreasing = i > 0 && windowCounts[i] > windowCounts[i - 1] * 1.3 && dl !== 'sparse';
+
+			if (dl === 'sparse' && !seenDense && i < windowCount * 0.3) {
+				type = 'intro';
+			} else if (dl === 'sparse' && seenDense && i >= windowCount * 0.7) {
+				type = 'outro';
+			} else if (dl === 'sparse' && seenDense) {
+				type = 'bridge';
+			} else if (dl === 'dense') {
+				seenDense = true;
+				type = 'chorus';
+			} else if (isIncreasing && !prevWasDense) {
+				type = 'buildup';
+			} else {
+				type = 'verse';
+			}
+
+			prevWasDense = dl === 'dense';
+
+			// Merge with previous section if same type
+			if (sections.length > 0 && sections[sections.length - 1].type === type) {
+				sections[sections.length - 1].endTime = end;
+			} else {
+				sections.push({ startTime: start, endTime: end, type, density: windowCounts[i] / maxCount });
+			}
+		}
+
+		return sections;
+	}
+
+	const songSections: SongSection[] = analyzeSongSections();
+
+	// Pre-compute interpolated section state (avoids allocation in draw loop)
+	let currentSectionVisuals: SectionVisualState = { ...SECTION_VISUAL_STATES.verse };
+	let prevSectionVisuals: SectionVisualState = { ...SECTION_VISUAL_STATES.verse };
+	let sectionTransitionStart = -999;
+	let currentSectionIdx = -1;
+	const SECTION_TRANSITION_DURATION = 2.0; // seconds to interpolate between sections
+
+	function lerpVisualState(a: SectionVisualState, b: SectionVisualState, t: number): SectionVisualState {
+		const s = Math.min(1, Math.max(0, t));
+		return {
+			brightness: a.brightness + (b.brightness - a.brightness) * s,
+			particleSpeed: a.particleSpeed + (b.particleSpeed - a.particleSpeed) * s,
+			warmShift: a.warmShift + (b.warmShift - a.warmShift) * s,
+			vibrancy: a.vibrancy + (b.vibrancy - a.vibrancy) * s,
+			laneSepBrightness: a.laneSepBrightness + (b.laneSepBrightness - a.laneSepBrightness) * s,
+		};
+	}
+
+	/** Reusable visual state object — updated each frame, never re-allocated */
+	const activeSectionVisuals: SectionVisualState = { brightness: 0.75, particleSpeed: 1, warmShift: 0, vibrancy: 0.6, laneSepBrightness: 0.8 };
+
+	function updateSectionVisuals(currentTime: number): void {
+		// Find current section
+		let newIdx = -1;
+		for (let i = 0; i < songSections.length; i++) {
+			if (currentTime >= songSections[i].startTime && currentTime < songSections[i].endTime) {
+				newIdx = i;
+				break;
+			}
+		}
+		if (newIdx === -1 && songSections.length > 0) {
+			// Past all sections — use outro style
+			newIdx = songSections.length - 1;
+		}
+
+		if (newIdx !== currentSectionIdx && newIdx >= 0) {
+			// Section changed — start transition
+			prevSectionVisuals.brightness = activeSectionVisuals.brightness;
+			prevSectionVisuals.particleSpeed = activeSectionVisuals.particleSpeed;
+			prevSectionVisuals.warmShift = activeSectionVisuals.warmShift;
+			prevSectionVisuals.vibrancy = activeSectionVisuals.vibrancy;
+			prevSectionVisuals.laneSepBrightness = activeSectionVisuals.laneSepBrightness;
+
+			const targetType = songSections[newIdx].type;
+			currentSectionVisuals = SECTION_VISUAL_STATES[targetType];
+			sectionTransitionStart = currentTime;
+			currentSectionIdx = newIdx;
+
+			// Trigger section name display
+			triggerSectionNameDisplay(targetType, currentTime);
+		}
+
+		// Interpolate
+		const elapsed = currentTime - sectionTransitionStart;
+		const t = Math.min(1, elapsed / SECTION_TRANSITION_DURATION);
+		const lerped = lerpVisualState(prevSectionVisuals, currentSectionVisuals, t);
+		activeSectionVisuals.brightness = lerped.brightness;
+		activeSectionVisuals.particleSpeed = lerped.particleSpeed;
+		activeSectionVisuals.warmShift = lerped.warmShift;
+		activeSectionVisuals.vibrancy = lerped.vibrancy;
+		activeSectionVisuals.laneSepBrightness = lerped.laneSepBrightness;
+	}
+
+	// ----- P22.3: Beat-synced camera zoom -----
+	let cameraZoomLevel = 0; // 0-1, decays to 0
+	let lastDownbeatTime = -999;
+
+	function updateCameraZoom(currentTime: number, combo: number): void {
+		// Detect downbeat (every 4 beats = 1 measure)
+		const measureDuration = beatDuration * 4;
+		const measurePhase = currentTime > 0 ? (currentTime % measureDuration) / measureDuration : 0;
+		const beatInMeasure = measurePhase * 4;
+
+		// Trigger zoom on downbeat (beat 0 of measure)
+		if (beatInMeasure < 0.15 && currentTime - lastDownbeatTime > measureDuration * 0.8) {
+			lastDownbeatTime = currentTime;
+			// Intensity based on combo: 0 at combo 0, max at 50+
+			const comboFactor = Math.min(1, combo / 50);
+			cameraZoomLevel = comboFactor;
+		}
+
+		// Decay zoom over one beat
+		const timeSinceDownbeat = currentTime - lastDownbeatTime;
+		if (timeSinceDownbeat > 0 && timeSinceDownbeat < beatDuration) {
+			const decay = 1 - (timeSinceDownbeat / beatDuration);
+			cameraZoomLevel *= decay;
+		} else if (timeSinceDownbeat >= beatDuration) {
+			cameraZoomLevel = 0;
+		}
+	}
+
+	function applyCameraZoom(): void {
+		if (cameraZoomLevel < 0.001) return;
+		const scale = 1 + cameraZoomLevel * 0.01; // max 1.01x
+		ctx.translate(w / 2, h / 2);
+		ctx.scale(scale, scale);
+		ctx.translate(-w / 2, -h / 2);
+	}
+
+	// ----- P22.4: Energy meter -----
+	let energyLevel = 0.5; // 0-1, starts at 50%
+	let prevPerfects = 0;
+	let prevGoods = 0;
+	let prevMisses = 0;
+	let energyFlashTime = -999; // time when energy hit 100%
+
+	// Sparkle particles for energy meter (pre-allocated pool)
+	type EnergySparkle = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number };
+	const energySparkles: EnergySparkle[] = [];
+	const MAX_ENERGY_SPARKLES = 20;
+
+	function updateEnergy(score: ScoreState, now: number): void {
+		// Detect new judgments by comparing counts
+		const newPerfects = score.perfects - prevPerfects;
+		const newGoods = score.goods - prevGoods;
+		const newMisses = score.misses - prevMisses;
+		prevPerfects = score.perfects;
+		prevGoods = score.goods;
+		prevMisses = score.misses;
+
+		energyLevel += newPerfects * 0.03 + newGoods * 0.01 - newMisses * 0.05;
+		energyLevel = Math.max(0, Math.min(1, energyLevel));
+
+		if (energyLevel >= 0.999 && now - energyFlashTime > 1) {
+			energyFlashTime = now;
+			// Spawn sparkles
+			for (let i = 0; i < 8 && energySparkles.length < MAX_ENERGY_SPARKLES; i++) {
+				energySparkles.push({
+					x: w - 20,
+					y: h * 0.1 + Math.random() * h * 0.7,
+					vx: -(30 + Math.random() * 60),
+					vy: (Math.random() - 0.5) * 80,
+					life: 0.6 + Math.random() * 0.6,
+					maxLife: 0.6 + Math.random() * 0.6,
+				});
+			}
+		}
+	}
+
+	function drawEnergyMeter(now: number, dt: number): void {
+		const meterX = w - 16;
+		const meterTop = h * 0.1;
+		const meterHeight = h * 0.7;
+		const meterWidth = 8;
+
+		// Background track
+		ctx.save();
+		ctx.fillStyle = 'rgba(255,255,255,0.06)';
+		ctx.fillRect(meterX - meterWidth / 2, meterTop, meterWidth, meterHeight);
+
+		// Fill color based on level
+		let fillColor: string;
+		if (energyLevel < 0.3) {
+			fillColor = `rgba(255, 60, 60, 0.8)`;
+		} else if (energyLevel < 0.7) {
+			const t = (energyLevel - 0.3) / 0.4;
+			const r = Math.round(255 - t * 55);
+			const g = Math.round(60 + t * 195);
+			fillColor = `rgba(${r}, ${g}, 40, 0.8)`;
+		} else {
+			fillColor = `rgba(60, 220, 60, 0.8)`;
+		}
+
+		// Fill from bottom
+		const fillHeight = meterHeight * energyLevel;
+		const fillTop = meterTop + meterHeight - fillHeight;
+		ctx.fillStyle = fillColor;
+		ctx.fillRect(meterX - meterWidth / 2, fillTop, meterWidth, fillHeight);
+
+		// Glow effect
+		ctx.shadowColor = fillColor;
+		ctx.shadowBlur = 10 + energyLevel * 8;
+		ctx.fillRect(meterX - meterWidth / 2, fillTop, meterWidth, Math.min(4, fillHeight));
+		ctx.shadowBlur = 0;
+
+		// Gold flash at 100%
+		if (energyLevel >= 0.999) {
+			const flashAge = now - energyFlashTime;
+			if (flashAge < 0.5) {
+				const alpha = 0.6 * (1 - flashAge / 0.5);
+				ctx.fillStyle = `rgba(255, 215, 0, ${alpha})`;
+				ctx.fillRect(meterX - meterWidth, meterTop, meterWidth * 2, meterHeight);
+			}
+		}
+		ctx.restore();
+
+		// Sparkle particles
+		for (let i = energySparkles.length - 1; i >= 0; i--) {
+			const s = energySparkles[i];
+			s.x += s.vx * dt;
+			s.y += s.vy * dt;
+			s.life -= dt;
+			if (s.life <= 0) {
+				energySparkles.splice(i, 1);
+				continue;
+			}
+			const alpha = s.life / s.maxLife;
+			ctx.save();
+			ctx.globalAlpha = alpha;
+			ctx.fillStyle = '#ffd700';
+			ctx.shadowColor = '#ffd700';
+			ctx.shadowBlur = 6;
+			ctx.beginPath();
+			ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
+			ctx.fill();
+			ctx.restore();
+		}
+
+		// Dark vignette at 0% energy
+		if (energyLevel < 0.15) {
+			const vignetteAlpha = (0.15 - energyLevel) / 0.15 * 0.5;
+			const vignette = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.8);
+			vignette.addColorStop(0, 'transparent');
+			vignette.addColorStop(1, `rgba(0, 0, 0, ${vignetteAlpha})`);
+			ctx.fillStyle = vignette;
+			ctx.fillRect(0, 0, w, h);
+		}
+	}
+
+	// ----- P22.5: Section name display -----
+	let sectionNameText = '';
+	let sectionNameStartTime = -999;
+	let sectionNameIsChorus = false;
+	const SECTION_NAME_FADE_IN = 0.3;
+	const SECTION_NAME_HOLD = 1.0;
+	const SECTION_NAME_FADE_OUT = 0.5;
+	const SECTION_NAME_TOTAL = SECTION_NAME_FADE_IN + SECTION_NAME_HOLD + SECTION_NAME_FADE_OUT;
+
+	const SECTION_DISPLAY_NAMES: Record<SongSectionType, string> = {
+		intro: 'INTRO',
+		verse: 'VERSE',
+		buildup: 'BUILDUP',
+		chorus: 'DROP!',
+		bridge: 'BRIDGE',
+		outro: 'FINALE',
+	};
+
+	function triggerSectionNameDisplay(type: SongSectionType, currentTime: number): void {
+		sectionNameText = SECTION_DISPLAY_NAMES[type];
+		sectionNameStartTime = currentTime;
+		sectionNameIsChorus = type === 'chorus';
+	}
+
+	function drawSectionName(currentTime: number): void {
+		const elapsed = currentTime - sectionNameStartTime;
+		if (elapsed < 0 || elapsed > SECTION_NAME_TOTAL) return;
+
+		let alpha: number;
+		if (elapsed < SECTION_NAME_FADE_IN) {
+			alpha = elapsed / SECTION_NAME_FADE_IN;
+		} else if (elapsed < SECTION_NAME_FADE_IN + SECTION_NAME_HOLD) {
+			alpha = 1;
+		} else {
+			alpha = 1 - (elapsed - SECTION_NAME_FADE_IN - SECTION_NAME_HOLD) / SECTION_NAME_FADE_OUT;
+		}
+		alpha = Math.max(0, Math.min(1, alpha)) * 0.6; // max 60% opacity — faded look
+
+		ctx.save();
+		ctx.globalAlpha = alpha;
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'middle';
+
+		if (sectionNameIsChorus) {
+			// Gold, larger, with glow
+			ctx.font = 'bold 56px monospace';
+			ctx.shadowColor = '#ffd700';
+			ctx.shadowBlur = 20 + alpha * 15;
+			ctx.fillStyle = '#ffd700';
+		} else {
+			ctx.font = 'bold 40px monospace';
+			ctx.shadowColor = 'rgba(255,255,255,0.4)';
+			ctx.shadowBlur = 10;
+			ctx.fillStyle = 'rgba(255,255,255,0.9)';
+		}
+
+		ctx.fillText(sectionNameText, w / 2, h * 0.35);
+		ctx.restore();
+	}
+
+	// ===== End P22 state declarations =====
 
 	const HIT_ZONE_Y_RATIO = 0.85;
 
@@ -576,12 +949,14 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 
 	// ----- Highway theme helpers -----
 	function getThemeLaneSepColor(bp: number): string {
+		// P22: modulate by section lane separator brightness
+		const lsb = activeSectionVisuals.laneSepBrightness;
 		switch (highwayTheme) {
-			case 'space': return `rgba(120, 80, 255, ${0.15 + bp * 0.12})`;
-			case 'ocean': return `rgba(40, 140, 220, ${0.12 + bp * 0.1})`;
-			case 'cyberpunk': return `rgba(255, 40, 180, ${0.18 + bp * 0.15})`;
-			case 'forest': return `rgba(60, 180, 80, ${0.12 + bp * 0.1})`;
-			default: return `rgba(${theme.gridColor}, ${0.12 + bp * 0.1})`;
+			case 'space': return `rgba(120, 80, 255, ${(0.15 + bp * 0.12) * lsb})`;
+			case 'ocean': return `rgba(40, 140, 220, ${(0.12 + bp * 0.1) * lsb})`;
+			case 'cyberpunk': return `rgba(255, 40, 180, ${(0.18 + bp * 0.15) * lsb})`;
+			case 'forest': return `rgba(60, 180, 80, ${(0.12 + bp * 0.1) * lsb})`;
+			default: return `rgba(${theme.gridColor}, ${(0.12 + bp * 0.1) * lsb})`;
 		}
 	}
 
@@ -851,77 +1226,110 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 
 	function drawBackground(currentTime: number, combo: number, beatPulse: number) {
 		currentTimeForAmbient = currentTime;
+
+		// P22: Section-aware vibrancy multiplier (also affected by energy)
+		const sectionBrightness = activeSectionVisuals.brightness;
+		const sectionVibrancy = activeSectionVisuals.vibrancy;
+		const energyVibrancyMul = 0.6 + energyLevel * 0.4; // 0.6 at 0 energy, 1.0 at full
+		const effectiveVibrancy = sectionVibrancy * energyVibrancyMul;
+
 		switch (highwayTheme) {
-			case 'space': drawBackgroundSpace(currentTime, combo, beatPulse); return;
-			case 'ocean': drawBackgroundOcean(currentTime, combo, beatPulse); return;
-			case 'cyberpunk': drawBackgroundCyberpunk(currentTime, combo, beatPulse); return;
-			case 'forest': drawBackgroundForest(currentTime, combo, beatPulse); return;
-			default: break;
+			case 'space': drawBackgroundSpace(currentTime, combo, beatPulse); break;
+			case 'ocean': drawBackgroundOcean(currentTime, combo, beatPulse); break;
+			case 'cyberpunk': drawBackgroundCyberpunk(currentTime, combo, beatPulse); break;
+			case 'forest': drawBackgroundForest(currentTime, combo, beatPulse); break;
+			default: {
+				// --- default theme (original, modulated by P22 section visuals) ---
+				const comboIntensity = Math.min(1, combo / 50);
+
+				// base gradient with theme colors
+				const grad = ctx.createRadialGradient(w / 2, h * 0.5, 0, w / 2, h * 0.5, Math.max(w, h) * 0.8);
+				grad.addColorStop(0, theme.bg2);
+				grad.addColorStop(0.5, theme.bg1);
+				grad.addColorStop(1, theme.bg3);
+				ctx.fillStyle = grad;
+				ctx.fillRect(0, 0, w, h);
+
+				// P22: Brightness overlay (darken during intro/outro, brighten during chorus)
+				if (sectionBrightness < 0.7) {
+					const darkAlpha = (0.7 - sectionBrightness) * 0.5;
+					ctx.fillStyle = `rgba(0, 0, 0, ${darkAlpha})`;
+					ctx.fillRect(0, 0, w, h);
+				} else if (sectionBrightness > 0.85) {
+					const brightAlpha = (sectionBrightness - 0.85) * 0.2;
+					// Warm or cool tint based on section
+					const warmShift = activeSectionVisuals.warmShift;
+					const tintHue = warmShift > 0 ? theme.hue + warmShift * 30 : theme.hue + warmShift * 20;
+					ctx.fillStyle = `hsla(${tintHue}, 60%, 50%, ${brightAlpha})`;
+					ctx.fillRect(0, 0, w, h);
+				}
+
+				// combo vibrancy overlay — modulated by section vibrancy
+				if (comboIntensity > 0.05) {
+					const vibrancy = ctx.createRadialGradient(w / 2, h * 0.6, 0, w / 2, h * 0.6, w * 0.7);
+					vibrancy.addColorStop(0, `hsla(${theme.hue}, 80%, 20%, ${comboIntensity * 0.15 * effectiveVibrancy})`);
+					vibrancy.addColorStop(1, `hsla(${theme.hue}, 80%, 5%, 0)`);
+					ctx.fillStyle = vibrancy;
+					ctx.fillRect(0, 0, w, h);
+				}
+
+				// bass pulse: radial breath on every beat — modulated by section
+				if (beatPulse > 0.05) {
+					const pulseRadius = w * 0.6 * (1 + beatPulse * 0.2);
+					const pulseGrad = ctx.createRadialGradient(w / 2, h * 0.5, 0, w / 2, h * 0.5, pulseRadius);
+					const pulseAlpha = beatPulse * 0.08 * (1 + comboIntensity) * effectiveVibrancy;
+					pulseGrad.addColorStop(0, `hsla(${theme.hue}, 70%, 30%, ${pulseAlpha})`);
+					pulseGrad.addColorStop(0.7, `hsla(${theme.hue}, 70%, 15%, ${beatPulse * 0.03 * effectiveVibrancy})`);
+					pulseGrad.addColorStop(1, 'transparent');
+					ctx.fillStyle = pulseGrad;
+					ctx.fillRect(0, 0, w, h);
+				}
+
+				// subtle moving grid with theme color
+				const gridAlpha = (0.03 + beatPulse * 0.02) * sectionBrightness;
+				ctx.strokeStyle = `rgba(${theme.gridColor}, ${gridAlpha})`;
+				ctx.lineWidth = 1;
+				const gridSize = 60;
+				const offsetY = (currentTime * 30) % gridSize;
+				for (let y = -gridSize + offsetY; y < h; y += gridSize) {
+					ctx.beginPath();
+					ctx.moveTo(0, y);
+					ctx.lineTo(w, y);
+					ctx.stroke();
+				}
+				for (let x = 0; x < w; x += gridSize) {
+					ctx.beginPath();
+					ctx.moveTo(x, 0);
+					ctx.lineTo(x, h);
+					ctx.stroke();
+				}
+				break;
+			}
 		}
-		// --- default theme (original) ---
-		const comboIntensity = Math.min(1, combo / 50);
 
-		// base gradient with theme colors
-		const grad = ctx.createRadialGradient(w / 2, h * 0.5, 0, w / 2, h * 0.5, Math.max(w, h) * 0.8);
-		grad.addColorStop(0, theme.bg2);
-		grad.addColorStop(0.5, theme.bg1);
-		grad.addColorStop(1, theme.bg3);
-		ctx.fillStyle = grad;
-		ctx.fillRect(0, 0, w, h);
-
-		// combo vibrancy overlay
-		if (comboIntensity > 0.05) {
-			const vibrancy = ctx.createRadialGradient(w / 2, h * 0.6, 0, w / 2, h * 0.6, w * 0.7);
-			vibrancy.addColorStop(0, `hsla(${theme.hue}, 80%, 20%, ${comboIntensity * 0.15})`);
-			vibrancy.addColorStop(1, `hsla(${theme.hue}, 80%, 5%, 0)`);
-			ctx.fillStyle = vibrancy;
+		// P22: Apply section brightness overlay for non-default themes too
+		if (highwayTheme !== 'default' && sectionBrightness < 0.65) {
+			const darkAlpha = (0.65 - sectionBrightness) * 0.4;
+			ctx.fillStyle = `rgba(0, 0, 0, ${darkAlpha})`;
 			ctx.fillRect(0, 0, w, h);
-		}
-
-		// bass pulse: radial breath on every beat
-		if (beatPulse > 0.05) {
-			const pulseRadius = w * 0.6 * (1 + beatPulse * 0.2);
-			const pulseGrad = ctx.createRadialGradient(w / 2, h * 0.5, 0, w / 2, h * 0.5, pulseRadius);
-			pulseGrad.addColorStop(0, `hsla(${theme.hue}, 70%, 30%, ${beatPulse * 0.08 * (1 + comboIntensity)})`);
-			pulseGrad.addColorStop(0.7, `hsla(${theme.hue}, 70%, 15%, ${beatPulse * 0.03})`);
-			pulseGrad.addColorStop(1, 'transparent');
-			ctx.fillStyle = pulseGrad;
-			ctx.fillRect(0, 0, w, h);
-		}
-
-		// subtle moving grid with theme color
-		const gridAlpha = 0.03 + beatPulse * 0.02;
-		ctx.strokeStyle = `rgba(${theme.gridColor}, ${gridAlpha})`;
-		ctx.lineWidth = 1;
-		const gridSize = 60;
-		const offsetY = (currentTime * 30) % gridSize;
-		for (let y = -gridSize + offsetY; y < h; y += gridSize) {
-			ctx.beginPath();
-			ctx.moveTo(0, y);
-			ctx.lineTo(w, y);
-			ctx.stroke();
-		}
-		for (let x = 0; x < w; x += gridSize) {
-			ctx.beginPath();
-			ctx.moveTo(x, 0);
-			ctx.lineTo(x, h);
-			ctx.stroke();
 		}
 	}
 
 	function drawStarfield(dt: number, combo: number) {
 		const comboIntensity = Math.min(1, combo / 50);
 		const layerMultipliers = [1, 1.5, 2.5]; // parallax speed multipliers
+		// P22: Section-aware particle speed
+		const sectionSpeedMul = activeSectionVisuals.particleSpeed;
 
 		for (const star of stars) {
-			const speedMul = layerMultipliers[star.layer];
+			const speedMul = layerMultipliers[star.layer] * sectionSpeedMul;
 			star.y += star.speed * speedMul * dt;
 			if (star.y > h) {
 				star.y = 0;
 				star.x = Math.random() * w;
 			}
 			const flicker = 0.7 + Math.sin(performance.now() / 1000 * star.speed * 0.1) * 0.3;
-			ctx.globalAlpha = star.brightness * flicker;
+			ctx.globalAlpha = star.brightness * flicker * activeSectionVisuals.brightness;
 
 			// streak/trail when combo is high
 			if (comboIntensity > 0.2 && star.layer >= 1) {
@@ -1286,6 +1694,92 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		}
 	}
 
+	// ----- Modifier helpers -----
+	function getModifierAlpha(noteYRatio: number, mods: ChartModifier[]): number {
+		let alpha = 1;
+		for (const mod of mods) {
+			if (mod === 'hidden') {
+				if (noteYRatio > 0.6) {
+					alpha *= 1 - Math.min(1, (noteYRatio - 0.6) / 0.2);
+				}
+			} else if (mod === 'sudden') {
+				if (noteYRatio < 0.5) {
+					alpha *= 0;
+				}
+			}
+		}
+		return alpha;
+	}
+
+	function drawFlashlightOverlay(hitZoneY: number) {
+		const spotlightCenter = hitZoneY;
+		const spotlightRadius = hitZoneY * 0.18;
+		ctx.save();
+		ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
+		ctx.fillRect(0, 0, w, h);
+		ctx.globalCompositeOperation = 'destination-out';
+		const grad = ctx.createRadialGradient(w / 2, spotlightCenter, 0, w / 2, spotlightCenter, spotlightRadius * 2.5);
+		grad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+		grad.addColorStop(0.4, 'rgba(0, 0, 0, 0.9)');
+		grad.addColorStop(0.7, 'rgba(0, 0, 0, 0.3)');
+		grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+		ctx.fillStyle = grad;
+		ctx.fillRect(0, 0, w, h);
+		ctx.globalCompositeOperation = 'source-over';
+		ctx.restore();
+	}
+
+	function drawHealthBar(healthVal: number) {
+		const barX = 20;
+		const barY = 80;
+		const barW = 140;
+		const barH = 6;
+		ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+		ctx.fillRect(barX, barY, barW, barH);
+		if (healthVal > 0) {
+			const fillW = barW * healthVal;
+			const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+			grad.addColorStop(0, '#ff2244');
+			grad.addColorStop(0.4, '#ffaa00');
+			grad.addColorStop(0.7, '#44ff66');
+			grad.addColorStop(1, '#44ff66');
+			ctx.fillStyle = grad;
+			ctx.fillRect(barX, barY, fillW, barH);
+			ctx.save();
+			ctx.shadowColor = healthVal > 0.5 ? '#44ff66' : healthVal > 0.25 ? '#ffaa00' : '#ff2244';
+			ctx.shadowBlur = 6;
+			ctx.beginPath();
+			ctx.arc(barX + fillW, barY + barH / 2, 2, 0, Math.PI * 2);
+			ctx.fillStyle = '#fff';
+			ctx.fill();
+			ctx.restore();
+		}
+	}
+
+	function drawModifierTags(mods: ChartModifier[]) {
+		if (mods.length === 0) return;
+		const tagX = w - 12;
+		let tagY = 96;
+		ctx.save();
+		ctx.font = '10px monospace';
+		ctx.textAlign = 'right';
+		for (const mod of mods) {
+			let color: string;
+			switch (mod) {
+				case 'hidden': color = '#ff8844'; break;
+				case 'sudden': color = '#44ddff'; break;
+				case 'flashlight': color = '#ffdd00'; break;
+				default: color = '#888'; break;
+			}
+			ctx.fillStyle = color;
+			ctx.globalAlpha = 0.7;
+			ctx.fillText(mod.toUpperCase(), tagX, tagY);
+			tagY += 14;
+		}
+		ctx.globalAlpha = 1;
+		ctx.restore();
+	}
+
 	// ----- Main draw -----
 	function draw(
 		currentTime: number,
@@ -1294,6 +1788,8 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		hitNotes: Set<number>,
 		flashes: JudgmentFlash[],
 		ghost?: GhostDrawState,
+		health?: number,
+		modifiers?: ChartModifier[],
 	) {
 		const now = performance.now() / 1000;
 		const dt = Math.min(now - lastDrawTime, 0.05);
@@ -1307,6 +1803,11 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 
 		ctx.clearRect(0, 0, w, h);
 
+		// P22: Update song section visuals + energy
+		updateSectionVisuals(currentTime);
+		updateCameraZoom(currentTime, score.combo);
+		updateEnergy(score, now);
+
 		// Apply screen shake
 		const shake = getShakeOffset(now);
 		if (shake.sx !== 0 || shake.sy !== 0) {
@@ -1314,7 +1815,14 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			ctx.translate(shake.sx, shake.sy);
 		}
 
-		// animated background (combo-reactive)
+		// P22.3: Apply beat-synced camera zoom (inside shake transform)
+		const hasZoom = cameraZoomLevel > 0.001;
+		if (hasZoom) {
+			if (shake.sx === 0 && shake.sy === 0) ctx.save();
+			applyCameraZoom();
+		}
+
+		// animated background (combo-reactive, modulated by section visuals + energy)
 		drawBackground(currentTime, score.combo, beatPulse);
 
 		// FFT audio visualizer bars (behind notes, on top of background)
@@ -1457,6 +1965,12 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			const y = hitZoneY - noteDt * config.scrollSpeedPx;
 			if (y < -60 || y > h + 60) continue;
 
+			// Apply modifier alpha (hidden/sudden)
+			const activeMods = modifiers ?? [];
+			const noteYRatio = Math.max(0, Math.min(1, y / hitZoneY));
+			const modAlpha = activeMods.length > 0 ? getModifierAlpha(noteYRatio, activeMods) : 1;
+			if (modAlpha <= 0) continue;
+
 			const { left, lw } = getHighwayXAtY(y);
 			const cx = left + note.lane * lw + lw / 2;
 			const baseNoteSize = lw * 0.5 * noteScale;
@@ -1469,6 +1983,7 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			if (noteSpeed > 400 && y < hitZoneY) {
 				const trailLen = Math.min(30, noteSpeed * dt * 4);
 				ctx.save();
+				ctx.globalAlpha = modAlpha;
 				const trailGrad = ctx.createLinearGradient(cx, y, cx, y - trailLen);
 				trailGrad.addColorStop(0, LANE_GLOW_COLORS[note.lane] + '0.3)');
 				trailGrad.addColorStop(1, LANE_GLOW_COLORS[note.lane] + '0)');
@@ -1482,6 +1997,7 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			}
 
 			ctx.save();
+			ctx.globalAlpha = modAlpha;
 			ctx.shadowColor = LANE_COLORS[note.lane];
 			ctx.shadowBlur = noteSkin === 'minimal' ? 0 : 10 + proximity * 15 + beatPulse * 5;
 
@@ -1490,7 +2006,12 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			ctx.restore();
 
 			// colorblind pattern overlay on tap notes
-			drawColorblindPattern(cx, y, note.lane, noteSize / 2);
+			if (modAlpha > 0.1) {
+				ctx.save();
+				ctx.globalAlpha = modAlpha;
+				drawColorblindPattern(cx, y, note.lane, noteSize / 2);
+				ctx.restore();
+			}
 
 			// additional halo for nearby notes (skip for minimal)
 			if (proximity > 0.3 && noteSkin !== 'minimal') {
@@ -1624,6 +2145,16 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		ctx.fillText(`${score.combo}x combo`, 20, 54);
 		ctx.restore();
 
+		// Health bar (when active)
+		if (health !== undefined) {
+			drawHealthBar(health);
+		}
+
+		// Active modifier tags in HUD
+		if (modifiers && modifiers.length > 0) {
+			drawModifierTags(modifiers);
+		}
+
 		// progress bar with gradient
 		const lastNoteTime = chart.notes[chart.notes.length - 1]?.t ?? 0;
 		const progress = lastNoteTime > 0 ? Math.min(1, currentTime / lastNoteTime) : 0;
@@ -1657,10 +2188,24 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 			drawGhostOverlay(ghost, hitZoneY);
 		}
 
+		// P22.4: Energy meter
+		drawEnergyMeter(now, dt);
+
+		// P22.5: Section name display
+		drawSectionName(currentTime);
+
 		// Full combo golden flash overlay
 		drawFullComboFlash(now);
 
-		// Restore shake transform
+		// Flashlight modifier overlay (drawn on top of everything)
+		if (modifiers && modifiers.includes('flashlight')) {
+			drawFlashlightOverlay(hitZoneY);
+		}
+
+		// Restore camera zoom + shake transform
+		if (hasZoom) {
+			if (shake.sx === 0 && shake.sy === 0) ctx.restore();
+		}
 		if (shake.sx !== 0 || shake.sy !== 0) {
 			ctx.restore();
 		}

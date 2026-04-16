@@ -7,6 +7,8 @@ import { applyJudgment, judge, judgeHold } from './scoring.js';
 import { applyMirror } from './modes.js';
 import { createEndlessManager } from './endless.js';
 import { createGhostOverlay, type GhostState } from './ghost.js';
+import { createHealthBar, type HealthBar } from './health.js';
+import { calculateDifficultyStars } from './difficulty-calc.js';
 
 export type Engine = {
 	start: () => void;
@@ -21,11 +23,14 @@ export type Engine = {
 	getLastDeltaMs: () => number | null;
 	/** Get recorded replay data after game ends */
 	getReplayData: () => ReplayData;
+	/** Current health (0-1). Returns 1 when health bar is disabled. */
+	getHealth: () => number;
 };
 
 export type EngineCallbacks = {
 	onStateChange?: (state: GameState) => void;
 	onScoreChange?: (score: ScoreState) => void;
+	onHealthChange?: (health: number) => void;
 };
 
 export function createEngine(
@@ -47,6 +52,16 @@ export function createEngine(
 	// Apply mirror mode at chart load time
 	const playNotes = modeConfig.mirror ? applyMirror(chart.notes) : [...chart.notes];
 	const playChart: Chart = { ...chart, notes: playNotes };
+
+	// Health bar: disabled in no-fail and practice modes
+	const healthEnabled = !modeConfig.noFail && !modeConfig.practice;
+	const difficultyStars = calculateDifficultyStars(playChart.notes, playChart.bpm);
+	let healthBar: HealthBar | null = healthEnabled ? createHealthBar(difficultyStars) : null;
+
+	// Dynamic difficulty: subtle timing window adjustment in normal mode only
+	const dynamicDifficultyEnabled = modeConfig.mode === 'normal';
+	const ROLLING_WINDOW_SIZE = 10;
+	let rollingGrades: JudgmentGrade[] = [];
 
 	// Endless mode manager (null for non-endless)
 	const endlessManager = modeConfig.mode === 'endless'
@@ -100,6 +115,41 @@ export function createEngine(
 		return result;
 	}
 
+	/** Apply health bar hit and check for death. */
+	function applyHealthHit(grade: JudgmentGrade): void {
+		if (!healthBar) return;
+		healthBar.applyHit(grade);
+		callbacks.onHealthChange?.(healthBar.getHealth());
+		if (healthBar.isDead()) {
+			setState('failed');
+			cancelAnimationFrame(rafId);
+			input.stop();
+		}
+	}
+
+	/** Get dynamic timing windows — subtly adjusts based on rolling accuracy. */
+	function getDynamicGoodWindow(): number {
+		if (!dynamicDifficultyEnabled || rollingGrades.length < ROLLING_WINDOW_SIZE) {
+			return effectiveConfig.goodWindowMs;
+		}
+		const hits = rollingGrades.filter((g) => g !== 'miss').length;
+		const rollingAcc = hits / rollingGrades.length;
+		if (rollingAcc < 0.4) {
+			return effectiveConfig.goodWindowMs * 1.2;
+		}
+		if (rollingAcc > 0.95) {
+			return effectiveConfig.goodWindowMs * 0.9;
+		}
+		return effectiveConfig.goodWindowMs;
+	}
+
+	function trackRollingGrade(grade: JudgmentGrade): void {
+		rollingGrades.push(grade);
+		if (rollingGrades.length > ROLLING_WINDOW_SIZE) {
+			rollingGrades.shift();
+		}
+	}
+
 	const COMBO_MILESTONES = [25, 50, 100];
 	function checkComboMilestone(prevCombo: number, newCombo: number) {
 		for (const milestone of COMBO_MILESTONES) {
@@ -150,7 +200,8 @@ export function createEngine(
 				}
 			}
 
-			if (bestIdx >= 0 && Math.abs(bestDelta) <= effectiveConfig.goodWindowMs) {
+			const dynamicWindow = getDynamicGoodWindow();
+			if (bestIdx >= 0 && Math.abs(bestDelta) <= dynamicWindow) {
 				const note = notes[bestIdx];
 
 				if (note.duration && note.duration > 0) {
@@ -158,12 +209,16 @@ export function createEngine(
 					activeHolds.set(bestIdx, { startTime: currentTime });
 					playHitSound(audio.ctx, 'good', note.instrument, note.freq);
 				} else {
-					// Regular tap note
-					const grade = judge(bestDelta, effectiveConfig);
+					// Regular tap note — use dynamic config for judging
+					const dynamicConfig = { ...effectiveConfig, goodWindowMs: dynamicWindow };
+					const grade = judge(bestDelta, dynamicConfig);
 					hitNotes.add(bestIdx);
 					lastDeltaMs = bestDelta;
 					const prevCombo = score.combo;
 					setScore(applyJudgmentWithMode(score, grade));
+					trackRollingGrade(grade);
+					applyHealthHit(grade);
+					if (state === 'failed') return;
 
 					flashes.push({
 						grade,
@@ -200,6 +255,9 @@ export function createEngine(
 				hitNotes.add(noteIdx);
 				const prevCombo = score.combo;
 				setScore(applyJudgmentWithMode(score, grade));
+				trackRollingGrade(grade);
+				applyHealthHit(grade);
+				if (state === 'failed') return;
 
 				flashes.push({
 					grade,
@@ -227,6 +285,9 @@ export function createEngine(
 			if (delta > effectiveConfig.goodWindowMs) {
 				hitNotes.add(i);
 				setScore(applyJudgmentWithMode(score, 'miss'));
+				trackRollingGrade('miss');
+				applyHealthHit('miss');
+				if (state === 'failed') return;
 				flashes.push({
 					grade: 'miss',
 					lane: note.lane,
@@ -263,6 +324,8 @@ export function createEngine(
 			hitNotes,
 			flashes,
 			ghostState ?? undefined,
+			healthBar?.getHealth() ?? undefined,
+			modeConfig.modifiers,
 		);
 
 		// Endless mode never ends on its own — only manual quit
@@ -363,6 +426,10 @@ export function createEngine(
 			lastDeltaMs = null;
 			replayEvents = [];
 			prevLanesPressed = new Set<Lane>();
+			rollingGrades = [];
+			if (healthEnabled) {
+				healthBar = createHealthBar(difficultyStars);
+			}
 			setScore(score);
 
 			// Restart
@@ -402,6 +469,9 @@ export function createEngine(
 				finalAccuracy: acc,
 				recordedAt: new Date().toISOString(),
 			};
+		},
+		getHealth() {
+			return healthBar?.getHealth() ?? 1;
 		},
 	};
 }
