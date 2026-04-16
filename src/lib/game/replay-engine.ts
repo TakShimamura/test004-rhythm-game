@@ -108,7 +108,7 @@ export function createReplayEngine(
 
 				if (note.duration && note.duration > 0) {
 					activeHolds.set(bestIdx, { startTime: currentTime });
-					playHitSound(audio.ctx, 'good');
+					playHitSound(audio.ctx, 'good', note.instrument, note.freq);
 				} else {
 					const grade = judge(bestDelta, effectiveConfig);
 					hitNotes.add(bestIdx);
@@ -119,7 +119,7 @@ export function createReplayEngine(
 					renderer.spawnParticles(event.lane, grade);
 
 					if (grade !== 'miss') {
-						playHitSound(audio.ctx, grade);
+						playHitSound(audio.ctx, grade, note.instrument, note.freq);
 						checkComboMilestone(prevCombo, score.combo);
 					} else {
 						playMissSound(audio.ctx);
@@ -149,7 +149,7 @@ export function createReplayEngine(
 				renderer.spawnParticles(note.lane, grade);
 
 				if (grade !== 'miss') {
-					playHitSound(audio.ctx, grade);
+					playHitSound(audio.ctx, grade, note.instrument, note.freq);
 					checkComboMilestone(prevCombo, score.combo);
 				} else {
 					playMissSound(audio.ctx);

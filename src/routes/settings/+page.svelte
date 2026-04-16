@@ -16,6 +16,10 @@
 		highwayTheme: 'default' as HighwayTheme,
 		hitEffect: 'sparkle' as HitEffect,
 		comboColor: 'default' as ComboColor,
+		masterVolume: 1.0,
+		musicVolume: 0.7,
+		sfxVolume: 0.8,
+		uiVolume: 0.5,
 	});
 
 	const NOTE_SKINS: { value: NoteSkin; label: string; desc: string }[] = [
@@ -89,6 +93,10 @@
 			highwayTheme: 'default',
 			hitEffect: 'sparkle',
 			comboColor: 'default',
+			masterVolume: 1.0,
+			musicVolume: 0.7,
+			sfxVolume: 0.8,
+			uiVolume: 0.5,
 		};
 		saveSettings(settings);
 		saved = true;
@@ -126,6 +134,63 @@
 				</div>
 			{/each}
 		</div>
+	</section>
+
+	<section>
+		<h2>VOLUME</h2>
+		<p class="desc">Adjust volume levels for each audio channel.</p>
+		<div class="volume-group">
+			<div class="slider-row">
+				<span class="vol-label">Master</span>
+				<input
+					type="range"
+					min="0"
+					max="1"
+					step="0.05"
+					bind:value={settings.masterVolume}
+				/>
+				<span class="value">{Math.round(settings.masterVolume * 100)}%</span>
+			</div>
+			<div class="slider-row">
+				<span class="vol-label">Music</span>
+				<input
+					type="range"
+					min="0"
+					max="1"
+					step="0.05"
+					bind:value={settings.musicVolume}
+				/>
+				<span class="value">{Math.round(settings.musicVolume * 100)}%</span>
+			</div>
+			<div class="slider-row">
+				<span class="vol-label">SFX</span>
+				<input
+					type="range"
+					min="0"
+					max="1"
+					step="0.05"
+					bind:value={settings.sfxVolume}
+				/>
+				<span class="value">{Math.round(settings.sfxVolume * 100)}%</span>
+			</div>
+			<div class="slider-row">
+				<span class="vol-label">UI</span>
+				<input
+					type="range"
+					min="0"
+					max="1"
+					step="0.05"
+					bind:value={settings.uiVolume}
+				/>
+				<span class="value">{Math.round(settings.uiVolume * 100)}%</span>
+			</div>
+		</div>
+	</section>
+
+	<section>
+		<h2>CALIBRATION</h2>
+		<p class="desc">Auto-detect your audio latency by tapping along with a metronome.</p>
+		<a href="/calibrate" class="calibrate-link">RUN CALIBRATION</a>
 	</section>
 
 	<section>
@@ -427,6 +492,39 @@
 	}
 
 	.back-link:hover { color: #888; }
+
+	/* Volume sliders */
+	.volume-group {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.vol-label {
+		font-size: 13px;
+		color: #aaa;
+		min-width: 56px;
+	}
+
+	/* Calibration link */
+	.calibrate-link {
+		display: inline-block;
+		font-family: monospace;
+		font-size: 14px;
+		padding: 8px 24px;
+		background: transparent;
+		border: 2px solid #4488ff;
+		color: #4488ff;
+		cursor: pointer;
+		letter-spacing: 2px;
+		text-decoration: none;
+		transition: all 0.15s;
+	}
+
+	.calibrate-link:hover {
+		background: rgba(68, 136, 255, 0.15);
+		box-shadow: 0 0 12px rgba(68, 136, 255, 0.25);
+	}
 
 	/* Note skin selector */
 	.skin-options {

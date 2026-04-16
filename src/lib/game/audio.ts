@@ -1,4 +1,4 @@
-import type { MusicStyle } from './types.js';
+import type { Instrument, Lane, MusicEvent, MusicStyle } from './types.js';
 
 export type GameAudio = {
 	ctx: AudioContext;
@@ -30,10 +30,25 @@ export function createGameAudio(): GameAudio {
 	};
 }
 
-export function playHitSound(ctx: AudioContext, grade: 'perfect' | 'good') {
+/**
+ * Play a musical hit sound that matches the instrument the note represents.
+ * Falls back to generic tones when no instrument info is available.
+ */
+export function playHitSound(
+	ctx: AudioContext,
+	grade: 'perfect' | 'good',
+	instrument?: Instrument,
+	freq?: number,
+) {
+	// If instrument info is available, play a musical hit
+	if (instrument) {
+		playMusicalHit(ctx, instrument, freq, grade === 'perfect' ? 1.0 : 0.7);
+		return;
+	}
+
+	// Legacy fallback: generic beep
 	const now = ctx.currentTime;
 	if (grade === 'perfect') {
-		// Bright "ping" with harmonic overtones (two sines in harmony)
 		const osc1 = ctx.createOscillator();
 		const osc2 = ctx.createOscillator();
 		const gain = ctx.createGain();
@@ -41,7 +56,7 @@ export function playHitSound(ctx: AudioContext, grade: 'perfect' | 'good') {
 		osc2.connect(gain);
 		gain.connect(ctx.destination);
 		osc1.frequency.value = 880;
-		osc2.frequency.value = 1320; // perfect fifth above
+		osc2.frequency.value = 1320;
 		gain.gain.value = 0.12;
 		gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
 		osc1.start(now);
@@ -49,7 +64,6 @@ export function playHitSound(ctx: AudioContext, grade: 'perfect' | 'good') {
 		osc1.stop(now + 0.12);
 		osc2.stop(now + 0.12);
 	} else {
-		// Softer single tone for "good"
 		const osc = ctx.createOscillator();
 		const gain = ctx.createGain();
 		osc.connect(gain);
@@ -62,18 +76,237 @@ export function playHitSound(ctx: AudioContext, grade: 'perfect' | 'good') {
 	}
 }
 
-export function playMissSound(ctx: AudioContext) {
+/**
+ * Play a short musical sound that matches the instrument in the backing track.
+ * This is what makes hitting notes feel like "playing the music."
+ */
+export function playMusicalHit(
+	ctx: AudioContext,
+	instrument: Instrument,
+	freq?: number,
+	intensity = 1.0,
+) {
 	const now = ctx.currentTime;
-	const osc = ctx.createOscillator();
-	const gain = ctx.createGain();
-	osc.type = 'square';
-	osc.connect(gain);
-	gain.connect(ctx.destination);
-	osc.frequency.value = 100;
-	gain.gain.value = 0.06;
-	gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
-	osc.start(now);
-	osc.stop(now + 0.05);
+	const vol = 0.15 * intensity;
+
+	switch (instrument) {
+		case 'kick': {
+			// Punchy low sine burst — same character as the backing kick
+			const osc = ctx.createOscillator();
+			const gain = ctx.createGain();
+			osc.connect(gain);
+			gain.connect(ctx.destination);
+			osc.frequency.setValueAtTime(150, now);
+			osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+			gain.gain.setValueAtTime(vol * 2.5, now);
+			gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+			osc.start(now);
+			osc.stop(now + 0.15);
+			break;
+		}
+		case 'snare': {
+			// Noise burst + tonal body — snare character
+			const bufferSize = Math.ceil(ctx.sampleRate * 0.1);
+			const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+			const data = noiseBuffer.getChannelData(0);
+			for (let i = 0; i < bufferSize; i++) {
+				const t = i / ctx.sampleRate;
+				const env = Math.exp(-t * 25);
+				data[i] = (Math.random() * 2 - 1) * env;
+			}
+			const noiseSource = ctx.createBufferSource();
+			noiseSource.buffer = noiseBuffer;
+			const gain = ctx.createGain();
+			noiseSource.connect(gain);
+			gain.connect(ctx.destination);
+			gain.gain.value = vol * 1.5;
+			noiseSource.start(now);
+			noiseSource.stop(now + 0.1);
+			// Tonal body
+			const osc = ctx.createOscillator();
+			const oscGain = ctx.createGain();
+			osc.connect(oscGain);
+			oscGain.connect(ctx.destination);
+			osc.frequency.value = 200;
+			oscGain.gain.setValueAtTime(vol * 0.8, now);
+			oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+			osc.start(now);
+			osc.stop(now + 0.08);
+			break;
+		}
+		case 'hihat': {
+			// Tiny metallic click
+			const bufferSize = Math.ceil(ctx.sampleRate * 0.04);
+			const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+			const data = noiseBuffer.getChannelData(0);
+			for (let i = 0; i < bufferSize; i++) {
+				const t = i / ctx.sampleRate;
+				const env = Math.exp(-t * 80);
+				data[i] = (Math.random() * 2 - 1) * env;
+			}
+			const src = ctx.createBufferSource();
+			src.buffer = noiseBuffer;
+			// Highpass to make it tinny
+			const hp = ctx.createBiquadFilter();
+			hp.type = 'highpass';
+			hp.frequency.value = 7000;
+			const gain = ctx.createGain();
+			src.connect(hp);
+			hp.connect(gain);
+			gain.connect(ctx.destination);
+			gain.gain.value = vol;
+			src.start(now);
+			src.stop(now + 0.04);
+			break;
+		}
+		case 'bass': {
+			// Short bass synth note at the correct frequency
+			const f = freq ?? 65;
+			const osc = ctx.createOscillator();
+			const osc2 = ctx.createOscillator();
+			const gain = ctx.createGain();
+			osc.connect(gain);
+			osc2.connect(gain);
+			gain.connect(ctx.destination);
+			osc.frequency.value = f;
+			osc2.frequency.value = f * 2; // octave overtone
+			osc.type = 'sawtooth';
+			gain.gain.setValueAtTime(vol * 1.5, now);
+			gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+			osc.start(now);
+			osc2.start(now);
+			osc.stop(now + 0.2);
+			osc2.stop(now + 0.2);
+			break;
+		}
+		case 'lead': {
+			// Quick synth stab at the correct pitch
+			const f = freq ?? 440;
+			const osc = ctx.createOscillator();
+			const gain = ctx.createGain();
+			osc.connect(gain);
+			gain.connect(ctx.destination);
+			osc.type = 'square';
+			osc.frequency.value = f;
+			// Add slight vibrato for character
+			const lfo = ctx.createOscillator();
+			const lfoGain = ctx.createGain();
+			lfo.connect(lfoGain);
+			lfoGain.connect(osc.frequency);
+			lfo.frequency.value = 5;
+			lfoGain.gain.value = 3;
+			lfo.start(now);
+			lfo.stop(now + 0.15);
+			gain.gain.setValueAtTime(vol, now);
+			gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+			osc.start(now);
+			osc.stop(now + 0.15);
+			break;
+		}
+		case 'arp': {
+			// Quick bright stab
+			const f = freq ?? 523;
+			const osc = ctx.createOscillator();
+			const gain = ctx.createGain();
+			osc.connect(gain);
+			gain.connect(ctx.destination);
+			osc.type = 'sawtooth';
+			osc.frequency.value = f;
+			gain.gain.setValueAtTime(vol * 0.8, now);
+			gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+			osc.start(now);
+			osc.stop(now + 0.1);
+			break;
+		}
+		case 'pad': {
+			// Soft sustained chord stab
+			const f = freq ?? 261;
+			const osc1 = ctx.createOscillator();
+			const osc2 = ctx.createOscillator();
+			const gain = ctx.createGain();
+			osc1.connect(gain);
+			osc2.connect(gain);
+			gain.connect(ctx.destination);
+			osc1.frequency.value = f;
+			osc2.frequency.value = f * 1.003; // slight detune
+			gain.gain.setValueAtTime(0.001, now);
+			gain.gain.linearRampToValueAtTime(vol * 0.5, now + 0.05);
+			gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+			osc1.start(now);
+			osc2.start(now);
+			osc1.stop(now + 0.3);
+			osc2.stop(now + 0.3);
+			break;
+		}
+	}
+}
+
+export function playMissSound(_ctx: AudioContext) {
+	// On miss, play nothing — the absence of the instrument IS the feedback.
+	// The backing track keeps playing but the player hears the "hole" they left.
+}
+
+// ---------------------------------------------------------------------------
+// Audio ducking: briefly reduce a frequency band on miss
+// ---------------------------------------------------------------------------
+
+export type DuckingController = {
+	/** Call when a note on the given lane is missed */
+	duckLane: (lane: Lane) => void;
+	/** Connect audio source to this node (input of the ducking chain) */
+	input: AudioNode;
+	/** Connect this node to destination/analyser (output of the ducking chain) */
+	output: AudioNode;
+	/** Clean up */
+	destroy: () => void;
+};
+
+export function createDuckingController(ctx: AudioContext): DuckingController {
+	const lowFilter = ctx.createBiquadFilter();
+	lowFilter.type = 'lowshelf';
+	lowFilter.frequency.value = 200;
+	lowFilter.gain.value = 0;
+
+	const midFilter = ctx.createBiquadFilter();
+	midFilter.type = 'peaking';
+	midFilter.frequency.value = 1000;
+	midFilter.Q.value = 1;
+	midFilter.gain.value = 0;
+
+	const highFilter = ctx.createBiquadFilter();
+	highFilter.type = 'highshelf';
+	highFilter.frequency.value = 3000;
+	highFilter.gain.value = 0;
+
+	// Chain: lowFilter -> midFilter -> highFilter
+	lowFilter.connect(midFilter);
+	midFilter.connect(highFilter);
+
+	function duckLane(lane: Lane) {
+		const now = ctx.currentTime;
+		const duckAmount = -12; // dB
+		const duckDuration = 0.2;
+
+		let filter: BiquadFilterNode;
+		if (lane === 0) filter = lowFilter;
+		else if (lane === 1) filter = midFilter;
+		else filter = highFilter;
+
+		filter.gain.cancelScheduledValues(now);
+		filter.gain.setValueAtTime(duckAmount, now);
+		filter.gain.linearRampToValueAtTime(0, now + duckDuration);
+	}
+
+	return {
+		duckLane,
+		input: lowFilter,
+		output: highFilter,
+		destroy() {
+			lowFilter.disconnect();
+			midFilter.disconnect();
+			highFilter.disconnect();
+		},
+	};
 }
 
 export function playComboMilestone(ctx: AudioContext, combo: number) {
@@ -279,128 +512,125 @@ const NOTES = {
 	C5: 523.25, D5: 587.33, E5: 659.25,
 } as const;
 
-type StyleGenerator = (p: SynthParams, bpm: number, durationSec: number) => void;
+// ---------------------------------------------------------------------------
+// Music schedule generators — build MusicEvent[] describing every instrument hit
+// ---------------------------------------------------------------------------
 
-const generateElectro: StyleGenerator = (p, bpm, durationSec) => {
+type ScheduleGenerator = (bpm: number, durationSec: number) => MusicEvent[];
+
+const generateElectroSchedule: ScheduleGenerator = (bpm, durationSec) => {
+	const events: MusicEvent[] = [];
 	const beat = 60 / bpm;
 	const eighth = beat / 2;
 	const sixteenth = beat / 4;
 	let barCount = 0;
 
 	for (let t = 0; t < durationSec; t += beat * 4) {
-		const isFillBar = (barCount + 1) % 8 === 0; // fill every 8 bars
+		const isFillBar = (barCount + 1) % 8 === 0;
 		for (let b = 0; b < 4 && t + b * beat < durationSec; b++) {
 			const bt = t + b * beat;
-			addBassDrum(p, bt, 0.35);
-			if (b === 1 || b === 3) addSnare(p, bt, 0.2);
-			addHihat(p, bt, 0.1);
-			addHihat(p, bt + eighth, 0.07);
+			events.push({ t: bt, instrument: 'kick', volume: 0.35 });
+			if (b === 1 || b === 3) events.push({ t: bt, instrument: 'snare', volume: 0.2 });
+			events.push({ t: bt, instrument: 'hihat', volume: 0.1 });
+			events.push({ t: bt + eighth, instrument: 'hihat', volume: 0.07 });
 
-			// drum fill on last bar of every 8
 			if (isFillBar && b >= 2) {
 				for (let s = 0; s < 4; s++) {
-					addSnare(p, bt + s * sixteenth, 0.12 + s * 0.03);
+					events.push({ t: bt + s * sixteenth, instrument: 'snare', volume: 0.12 + s * 0.03 });
 				}
-				addOpenHihat(p, bt + eighth, 0.08);
 			}
 		}
 		barCount++;
 	}
 
-	// bass line
 	const bassNotes = [NOTES.C2, NOTES.C2, NOTES.Bb2, NOTES.G2, NOTES.C2, NOTES.E2, NOTES.G2, NOTES.Bb2];
 	let bassIdx = 0;
 	for (let t = 0; t < durationSec; t += beat) {
 		const freq = bassNotes[bassIdx % bassNotes.length];
-		addBassSynth(p, t, freq, beat * 0.8, 0.15);
+		events.push({ t, instrument: 'bass', freq, duration: beat * 0.8, volume: 0.15 });
 		bassIdx++;
 	}
 
-	// lead melody
 	const leadPhrase = [NOTES.C4, NOTES.E4, NOTES.G4, NOTES.Bb4, NOTES.G4, NOTES.E4, NOTES.C4, NOTES.D4];
 	let leadIdx = 0;
 	for (let t = beat * 4; t < durationSec; t += beat) {
 		if (leadIdx % 16 < 8) {
-			addLeadSynth(p, t, leadPhrase[leadIdx % leadPhrase.length], beat * 0.6, 0.08);
+			events.push({ t, instrument: 'lead', freq: leadPhrase[leadIdx % leadPhrase.length], duration: beat * 0.6, volume: 0.08 });
 		}
 		leadIdx++;
 	}
 
-	// arp synth — trance-style arp layered every 8 bars
 	const arpNotes = [NOTES.C4, NOTES.E4, NOTES.G4, NOTES.C5, NOTES.G4, NOTES.E4];
 	for (let t = beat * 8; t < durationSec; t += beat * 16) {
-		addArpSynth(p, t, arpNotes, beat * 8, bpm / 15, 0.06);
+		events.push({ t, instrument: 'arp', freq: arpNotes[0], duration: beat * 8, volume: 0.06 });
 	}
+
+	return events;
 };
 
-const generateDnb: StyleGenerator = (p, bpm, durationSec) => {
+const generateDnbSchedule: ScheduleGenerator = (bpm, durationSec) => {
+	const events: MusicEvent[] = [];
 	const beat = 60 / bpm;
 	const sixteenth = beat / 4;
 	let barCount = 0;
 
 	for (let t = 0; t < durationSec; t += beat * 4) {
-		const isBreakbar = barCount % 4 >= 2; // alternate drum pattern every 2 bars
+		const isBreakbar = barCount % 4 >= 2;
 		for (let b = 0; b < 4 && t + b * beat < durationSec; b++) {
 			const bt = t + b * beat;
 			if (isBreakbar) {
-				// breakbeat variation: syncopated kick pattern
-				if (b === 0) addBassDrum(p, bt, 0.4);
-				if (b === 1) addBassDrum(p, bt + sixteenth * 3, 0.3);
-				if (b === 3) addBassDrum(p, bt + sixteenth, 0.35);
-				if (b === 1 || b === 3) addSnare(p, bt, 0.25);
-				if (b === 2) addSnare(p, bt + sixteenth * 2, 0.2);
+				if (b === 0) events.push({ t: bt, instrument: 'kick', volume: 0.4 });
+				if (b === 1) events.push({ t: bt + sixteenth * 3, instrument: 'kick', volume: 0.3 });
+				if (b === 3) events.push({ t: bt + sixteenth, instrument: 'kick', volume: 0.35 });
+				if (b === 1 || b === 3) events.push({ t: bt, instrument: 'snare', volume: 0.25 });
+				if (b === 2) events.push({ t: bt + sixteenth * 2, instrument: 'snare', volume: 0.2 });
 			} else {
-				// classic two-step
-				if (b === 0) addBassDrum(p, bt, 0.4);
-				if (b === 2) addBassDrum(p, bt + sixteenth * 2, 0.35);
-				if (b === 1 || b === 3) addSnare(p, bt, 0.25);
+				if (b === 0) events.push({ t: bt, instrument: 'kick', volume: 0.4 });
+				if (b === 2) events.push({ t: bt + sixteenth * 2, instrument: 'kick', volume: 0.35 });
+				if (b === 1 || b === 3) events.push({ t: bt, instrument: 'snare', volume: 0.25 });
 			}
-			// rapid hi-hats
 			for (let s = 0; s < 4; s++) {
 				const ht = bt + s * sixteenth;
 				if (ht < durationSec) {
-					addHihat(p, ht, s % 2 === 0 ? 0.1 : 0.06);
+					events.push({ t: ht, instrument: 'hihat', volume: s % 2 === 0 ? 0.1 : 0.06 });
 				}
 			}
-			if (b % 2 === 1) addOpenHihat(p, bt + sixteenth * 3, 0.06);
 		}
 		barCount++;
 	}
 
-	// aggressive rolling bass — more harmonics, faster movement
 	const bassNotes = [NOTES.C2, NOTES.D2, NOTES.E2, NOTES.G2, NOTES.F2, NOTES.D2];
 	let bassIdx = 0;
 	for (let t = 0; t < durationSec; t += beat * 0.5) {
 		const freq = bassNotes[bassIdx % bassNotes.length];
-		addBassSynth(p, t, freq, beat * 0.4, 0.2);
-		// sub-bass layer for aggression
-		addSineAt(p, t, freq * 0.5, beat * 0.35, 0.08);
+		events.push({ t, instrument: 'bass', freq, duration: beat * 0.4, volume: 0.2 });
 		bassIdx++;
 	}
 
-	// staccato lead stabs
 	const leadNotes = [NOTES.C5, NOTES.Bb4, NOTES.G4, NOTES.E4];
 	let li = 0;
 	for (let t = beat * 2; t < durationSec; t += beat * 2) {
-		addLeadSynth(p, t, leadNotes[li % leadNotes.length], beat * 0.3, 0.07);
+		events.push({ t, instrument: 'lead', freq: leadNotes[li % leadNotes.length], duration: beat * 0.3, volume: 0.07 });
 		li++;
 	}
+
+	return events;
 };
 
-const generateChill: StyleGenerator = (p, bpm, durationSec) => {
+const generateChillSchedule: ScheduleGenerator = (bpm, durationSec) => {
+	const events: MusicEvent[] = [];
 	const beat = 60 / bpm;
 
 	for (let t = 0; t < durationSec; t += beat * 4) {
 		for (let b = 0; b < 4 && t + b * beat < durationSec; b++) {
 			const bt = t + b * beat;
-			if (b === 0 || b === 2) addBassDrum(p, bt, 0.2);
-			if (b === 1 || b === 3) addSnare(p, bt, 0.1);
-			addHihat(p, bt, 0.05);
-			addHihat(p, bt + beat / 2, 0.03);
+			if (b === 0 || b === 2) events.push({ t: bt, instrument: 'kick', volume: 0.2 });
+			if (b === 1 || b === 3) events.push({ t: bt, instrument: 'snare', volume: 0.1 });
+			events.push({ t: bt, instrument: 'hihat', volume: 0.05 });
+			events.push({ t: bt + beat / 2, instrument: 'hihat', volume: 0.03 });
 		}
 	}
 
-	// pad synth — warm detuned chords for atmosphere
 	const padChords = [
 		[NOTES.C3, NOTES.E3, NOTES.G3],
 		[NOTES.A2, NOTES.C3, NOTES.E3],
@@ -409,11 +639,10 @@ const generateChill: StyleGenerator = (p, bpm, durationSec) => {
 	];
 	let pi = 0;
 	for (let t = 0; t < durationSec; t += beat * 8) {
-		addPadSynth(p, t, padChords[pi % padChords.length], beat * 7.5, 0.05);
+		events.push({ t, instrument: 'pad', freq: padChords[pi % padChords.length][0], duration: beat * 7.5, volume: 0.05 });
 		pi++;
 	}
 
-	// melodic bass line — walks through chord tones
 	const bassLine = [
 		NOTES.C2, NOTES.E2, NOTES.G2, NOTES.E2,
 		NOTES.A2, NOTES.C3, NOTES.A2, NOTES.G2,
@@ -422,50 +651,121 @@ const generateChill: StyleGenerator = (p, bpm, durationSec) => {
 	];
 	let bi = 0;
 	for (let t = 0; t < durationSec; t += beat) {
-		addBassSynth(p, t, bassLine[bi % bassLine.length], beat * 0.9, 0.1);
+		events.push({ t, instrument: 'bass', freq: bassLine[bi % bassLine.length], duration: beat * 0.9, volume: 0.1 });
 		bi++;
 	}
 
-	// gentle lead melody
 	const melody = [NOTES.E4, NOTES.G4, NOTES.A4, NOTES.G4, NOTES.E4, NOTES.D4, NOTES.C4, NOTES.D4];
 	let mi = 0;
 	for (let t = beat * 2; t < durationSec; t += beat * 2) {
 		if (mi % 8 < 6) {
-			addLeadSynth(p, t, melody[mi % melody.length], beat * 1.5, 0.05);
+			events.push({ t, instrument: 'lead', freq: melody[mi % melody.length], duration: beat * 1.5, volume: 0.05 });
 		}
 		mi++;
 	}
 
-	// ambient sine pad for extra warmth
-	for (let t = 0; t < durationSec; t += beat * 8) {
-		addSineAt(p, t, NOTES.C4, beat * 7, 0.03);
-		addSineAt(p, t, NOTES.G3, beat * 7, 0.02);
-	}
+	return events;
 };
 
-const STYLE_GENERATORS: Record<MusicStyle, StyleGenerator> = {
-	electro: generateElectro,
-	dnb: generateDnb,
-	chill: generateChill,
-};
-
-// Default metronome fallback (for charts with no style)
-function generateDefaultBacking(p: SynthParams, bpm: number, durationSec: number) {
+const generateDefaultSchedule: ScheduleGenerator = (bpm, durationSec) => {
+	const events: MusicEvent[] = [];
 	const beat = 60 / bpm;
 	const eighth = beat / 2;
 
 	for (let t = 0; t < durationSec; t += beat) {
-		addBassDrum(p, t, 0.25);
-		addHihat(p, t, 0.08);
-		addHihat(p, t + eighth, 0.05);
+		events.push({ t, instrument: 'kick', volume: 0.25 });
+		events.push({ t, instrument: 'hihat', volume: 0.08 });
+		events.push({ t: t + eighth, instrument: 'hihat', volume: 0.05 });
 	}
 
-	// add a simple bass to make it more musical than a raw metronome
 	const bassNotes = [NOTES.C2, NOTES.G2, NOTES.A2, NOTES.F2];
 	let bi = 0;
 	for (let t = 0; t < durationSec; t += beat * 2) {
-		addBassSynth(p, t, bassNotes[bi % bassNotes.length], beat * 1.5, 0.1);
+		events.push({ t, instrument: 'bass', freq: bassNotes[bi % bassNotes.length], duration: beat * 1.5, volume: 0.1 });
 		bi++;
+	}
+
+	return events;
+};
+
+const SCHEDULE_GENERATORS: Record<MusicStyle, ScheduleGenerator> = {
+	electro: generateElectroSchedule,
+	dnb: generateDnbSchedule,
+	chill: generateChillSchedule,
+};
+
+/**
+ * Generate a schedule of all music events for a given style.
+ * This is the single source of truth that both the audio renderer and the
+ * chart generator consume.
+ */
+export function generateMusicSchedule(
+	bpm: number,
+	durationSec: number,
+	style?: MusicStyle,
+): MusicEvent[] {
+	const gen = style ? SCHEDULE_GENERATORS[style] : undefined;
+	const events = gen ? gen(bpm, durationSec) : generateDefaultSchedule(bpm, durationSec);
+	// Sort by time for deterministic processing
+	return events.sort((a, b) => a.t - b.t);
+}
+
+// ---------------------------------------------------------------------------
+// Render a MusicEvent[] schedule to an AudioBuffer
+// ---------------------------------------------------------------------------
+
+function renderScheduleToBuffer(p: SynthParams, schedule: MusicEvent[], bpm: number, style?: MusicStyle) {
+	const beat = 60 / bpm;
+
+	for (const ev of schedule) {
+		switch (ev.instrument) {
+			case 'kick':
+				addBassDrum(p, ev.t, ev.volume ?? 0.35);
+				break;
+			case 'snare':
+				addSnare(p, ev.t, ev.volume ?? 0.2);
+				break;
+			case 'hihat':
+				addHihat(p, ev.t, ev.volume ?? 0.1);
+				break;
+			case 'bass':
+				addBassSynth(p, ev.t, ev.freq ?? NOTES.C2, ev.duration ?? beat * 0.8, ev.volume ?? 0.15);
+				// DnB sub-bass layer
+				if (style === 'dnb' && ev.freq) {
+					addSineAt(p, ev.t, ev.freq * 0.5, (ev.duration ?? beat * 0.4) * 0.875, 0.08);
+				}
+				break;
+			case 'lead':
+				addLeadSynth(p, ev.t, ev.freq ?? NOTES.C4, ev.duration ?? beat * 0.6, ev.volume ?? 0.08);
+				break;
+			case 'arp': {
+				// For arp events, reconstruct the arpeggio pattern
+				const arpNotes = style === 'electro'
+					? [NOTES.C4, NOTES.E4, NOTES.G4, NOTES.C5, NOTES.G4, NOTES.E4]
+					: [ev.freq ?? NOTES.C4];
+				addArpSynth(p, ev.t, arpNotes, ev.duration ?? beat * 8, bpm / 15, ev.volume ?? 0.06);
+				break;
+			}
+			case 'pad': {
+				// Reconstruct pad chords from the chill style
+				const padChords = [
+					[NOTES.C3, NOTES.E3, NOTES.G3],
+					[NOTES.A2, NOTES.C3, NOTES.E3],
+					[NOTES.F2, NOTES.A2, NOTES.C3],
+					[NOTES.G2, NOTES.Bb2, NOTES.D3],
+				];
+				// Find closest chord root
+				const freq = ev.freq ?? NOTES.C3;
+				const chord = padChords.find(c => Math.abs(c[0] - freq) < 1) ?? padChords[0];
+				addPadSynth(p, ev.t, chord, ev.duration ?? beat * 7.5, ev.volume ?? 0.05);
+				// Add ambient sine layers for chill
+				if (style === 'chill') {
+					addSineAt(p, ev.t, NOTES.C4, (ev.duration ?? beat * 7) * 0.93, 0.03);
+					addSineAt(p, ev.t, NOTES.G3, (ev.duration ?? beat * 7) * 0.93, 0.02);
+				}
+				break;
+			}
+		}
 	}
 }
 
@@ -486,11 +786,9 @@ export function generateBackingTrack(
 
 	const params: SynthParams = { sampleRate, data };
 
-	if (style && STYLE_GENERATORS[style]) {
-		STYLE_GENERATORS[style](params, bpm, durationSec);
-	} else {
-		generateDefaultBacking(params, bpm, durationSec);
-	}
+	// Use schedule-based rendering for consistent audio
+	const schedule = generateMusicSchedule(bpm, durationSec, style);
+	renderScheduleToBuffer(params, schedule, bpm, style);
 
 	// soft-clip to prevent distortion
 	for (let i = 0; i < totalSamples; i++) {

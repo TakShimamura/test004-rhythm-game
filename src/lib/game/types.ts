@@ -1,10 +1,24 @@
 export type Lane = 0 | 1 | 2;
 
+export type Instrument = 'kick' | 'snare' | 'hihat' | 'bass' | 'lead' | 'arp' | 'pad';
+
+export type MusicEvent = {
+	t: number;           // seconds
+	instrument: Instrument;
+	freq?: number;       // for pitched instruments
+	duration?: number;   // for sustained notes
+	volume?: number;
+};
+
 export type Note = {
 	t: number;
 	lane: Lane;
 	/** Hold note duration in seconds. When present, renders as a long bar. */
 	duration?: number;
+	/** Which musical instrument this note represents */
+	instrument?: Instrument;
+	/** Pitch for melodic instruments (bass, lead, arp) */
+	freq?: number;
 };
 
 export type Difficulty = 'easy' | 'normal' | 'hard';

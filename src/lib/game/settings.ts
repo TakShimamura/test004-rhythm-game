@@ -15,6 +15,10 @@ export type UserSettings = {
 	highwayTheme: HighwayTheme;
 	hitEffect: HitEffect;
 	comboColor: ComboColor;
+	masterVolume: number;
+	musicVolume: number;
+	sfxVolume: number;
+	uiVolume: number;
 };
 
 const DEFAULTS: UserSettings = {
@@ -29,6 +33,10 @@ const DEFAULTS: UserSettings = {
 	highwayTheme: DEFAULT_CONFIG.highwayTheme,
 	hitEffect: DEFAULT_CONFIG.hitEffect,
 	comboColor: DEFAULT_CONFIG.comboColor,
+	masterVolume: 1.0,
+	musicVolume: 0.7,
+	sfxVolume: 0.8,
+	uiVolume: 0.5,
 };
 
 export function loadSettings(): UserSettings {
@@ -75,6 +83,18 @@ export function loadSettings(): UserSettings {
 			comboColor: validComboColors.includes(parsed.comboColor)
 				? parsed.comboColor
 				: DEFAULTS.comboColor,
+			masterVolume: typeof parsed.masterVolume === 'number' && parsed.masterVolume >= 0 && parsed.masterVolume <= 1
+				? parsed.masterVolume
+				: DEFAULTS.masterVolume,
+			musicVolume: typeof parsed.musicVolume === 'number' && parsed.musicVolume >= 0 && parsed.musicVolume <= 1
+				? parsed.musicVolume
+				: DEFAULTS.musicVolume,
+			sfxVolume: typeof parsed.sfxVolume === 'number' && parsed.sfxVolume >= 0 && parsed.sfxVolume <= 1
+				? parsed.sfxVolume
+				: DEFAULTS.sfxVolume,
+			uiVolume: typeof parsed.uiVolume === 'number' && parsed.uiVolume >= 0 && parsed.uiVolume <= 1
+				? parsed.uiVolume
+				: DEFAULTS.uiVolume,
 		};
 	} catch {
 		return { ...DEFAULTS };

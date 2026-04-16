@@ -8,36 +8,52 @@ social, game modes, juice — all shipped.
 
 ## P11 — Multiplayer (deferred — needs WebSocket architecture)
 
-## P12–P15: COMPLETE
-Advanced chart editor, audio analysis, cosmetics, mobile + accessibility.
+## P12–P20: COMPLETE
+Advanced chart editor, audio analysis, cosmetics, mobile + accessibility,
+tutorial, stats, community, advanced audio, replay system.
 
-## P16 — Tutorial + onboarding
-- [ ] Interactive tutorial: first-launch guided play through a simple chart
-- [ ] Progressive difficulty unlock: start with 1 lane, add lanes as player improves
-- [ ] Tooltip hints on first visit to each page
-- [ ] Demo autoplay mode: AI plays a chart to show what it looks like
+## P21 — Music-synced gameplay (CRITICAL FIX)
+- [~] Unified music event schedule (instruments mapped to timeline)
+- [ ] Charts generated FROM music events (notes = musical hits)
+- [ ] Musical hit sounds (kick/snare/bass/lead per note, not generic beep)
+- [ ] Audio ducking on miss (music stumbles when you miss)
+- [ ] Lane-to-instrument mapping (A=bass/kick, S=snare, D=melody)
 
-## P17 — Statistics + analytics
-- [ ] Detailed per-song stats: best score, attempts, improvement graph
-- [ ] Accuracy heatmap: visualize which sections of a chart you struggle with
-- [ ] Session summary: after multiple plays, show trends
-- [ ] Export stats as image (shareable card with grade, accuracy, combo)
+## P22 — Visual storytelling + stage effects
+- [ ] Stage backgrounds that evolve during a song (intro → buildup → drop → outro)
+- [ ] Beat-synced camera zoom/pulse (subtle canvas scale on downbeats)
+- [ ] Lane color shifts during song sections (verse=cool, chorus=warm)
+- [ ] Lyrics/text display system (show song section names during play)
+- [ ] Crowd/energy meter that fills based on performance
 
-## P18 — Community features
-- [ ] Chart comments with timestamps ("hard section at 0:45!")
-- [ ] Chart collections / playlists (curated sets of charts)
-- [ ] Featured charts rotation on home page
-- [ ] Report inappropriate content
-- [ ] Chart difficulty voting (community consensus on easy/normal/hard)
+## P23 — Difficulty system overhaul
+- [ ] Auto-difficulty: analyze player's recent accuracy, suggest appropriate charts
+- [ ] Difficulty stars (1-10 scale) computed from note density + speed + patterns
+- [ ] Dynamic difficulty: if player is struggling, subtly widen timing windows mid-song
+- [ ] Chart modifiers: hidden (notes fade before hit zone), sudden (notes appear late)
+- [ ] Fail state: game over if health bar empties (health drains on miss, heals on hit)
 
-## P19 — Advanced audio
-- [ ] Audio visualizer bars in background (FFT-based, reacts to music)
-- [ ] Custom sound packs (upload your own hit sounds)
-- [ ] Music preview on song select (play 10s clip on hover)
-- [ ] Crossfade between menu music and gameplay
+## P24 — Sound design
+- [ ] Keysound system: each note triggers a unique pitched sample
+- [ ] Audio mixing: separate volume sliders for music/SFX/hit sounds
+- [ ] Metronome toggle: optional click track overlay for practice
+- [ ] Audio latency auto-calibration wizard (tap-to-calibrate)
 
-## P20 — Replay + spectate
-- [ ] Record input timeline during gameplay
-- [ ] Replay viewer: watch your own or others' replays
-- [ ] Ghost mode: play alongside a replay (see ghost notes)
-- [ ] Share replay as link
+## P25 — Content pipeline
+- [ ] YouTube/SoundCloud URL import (extract audio, auto-detect BPM)
+- [ ] Chart format import (osu!/StepMania .osu/.sm file parsing)
+- [ ] Batch chart generation: generate easy/normal/hard from one audio
+- [ ] Chart validation: warn about impossible patterns before publish
+
+## P26 — Performance + polish
+- [ ] WebGL renderer option (for low-end devices struggling with Canvas 2D)
+- [ ] Offscreen canvas for particle systems
+- [ ] Asset preloading with progress bar
+- [ ] Service worker for offline play (cached songs + charts)
+- [ ] PWA manifest for "Add to Home Screen"
+
+## P27 — Economy + incentives
+- [ ] In-game currency earned from plays
+- [ ] Cosmetic shop: buy themes/skins/effects with earned currency
+- [ ] Season pass: weekly challenges with exclusive rewards
+- [ ] Streak rewards: daily login/play streak bonuses

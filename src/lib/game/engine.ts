@@ -1,7 +1,7 @@
 import type { Chart, GameConfig, GameState, GameModeConfig, JudgmentGrade, Lane, ScoreState, ReplayEvent, ReplayData } from './types.js';
 import { DEFAULT_CONFIG, DEFAULT_MODE_CONFIG, emptyScore } from './types.js';
 import { createInputHandler, type InputHandler } from './input.js';
-import { createGameAudio, generateBackingTrack, playHitSound, playMissSound, playComboMilestone, playFullComboSound, type GameAudio } from './audio.js';
+import { createGameAudio, generateBackingTrack, playHitSound, playMissSound, playComboMilestone, playFullComboSound, createDuckingController, type GameAudio, type DuckingController } from './audio.js';
 import { createRenderer, type JudgmentFlash, type Renderer } from './renderer.js';
 import { applyJudgment, judge, judgeHold } from './scoring.js';
 import { applyMirror } from './modes.js';
@@ -76,6 +76,7 @@ export function createEngine(
 	let ghostState: GhostState | null = null;
 
 	let trackSource: AudioBufferSourceNode | null = null;
+	let ducker: DuckingController | null = null;
 
 	function setState(s: GameState) {
 		state = s;
@@ -155,7 +156,7 @@ export function createEngine(
 				if (note.duration && note.duration > 0) {
 					// Hold note: start tracking, don't score yet
 					activeHolds.set(bestIdx, { startTime: currentTime });
-					playHitSound(audio.ctx, 'good');
+					playHitSound(audio.ctx, 'good', note.instrument, note.freq);
 				} else {
 					// Regular tap note
 					const grade = judge(bestDelta, effectiveConfig);
@@ -172,10 +173,11 @@ export function createEngine(
 
 					renderer.spawnParticles(event.lane, grade);
 					if (grade !== 'miss') {
-						playHitSound(audio.ctx, grade);
+						playHitSound(audio.ctx, grade, note.instrument, note.freq);
 						checkComboMilestone(prevCombo, score.combo);
 					} else {
 						playMissSound(audio.ctx);
+						ducker?.duckLane(note.lane);
 						renderer.triggerShake();
 					}
 				}
@@ -207,10 +209,11 @@ export function createEngine(
 
 				renderer.spawnParticles(note.lane, grade);
 				if (grade !== 'miss') {
-					playHitSound(audio.ctx, grade);
+					playHitSound(audio.ctx, grade, note.instrument, note.freq);
 					checkComboMilestone(prevCombo, score.combo);
 				} else {
 					playMissSound(audio.ctx);
+					ducker?.duckLane(note.lane);
 					renderer.triggerShake();
 				}
 			}
@@ -230,6 +233,7 @@ export function createEngine(
 					time: performance.now() / 1000,
 				});
 				playMissSound(audio.ctx);
+				ducker?.duckLane(note.lane);
 				renderer.triggerShake();
 			}
 		}
@@ -310,8 +314,13 @@ export function createEngine(
 		const buffer = generateBackingTrack(audio.ctx, playChart.bpm, trackDuration, playChart.style);
 		trackSource = audio.ctx.createBufferSource();
 		trackSource.buffer = buffer;
-		// Route: source -> analyser -> destination
-		trackSource.connect(analyser);
+
+		// Set up ducking controller for miss feedback
+		ducker = createDuckingController(audio.ctx);
+
+		// Route: source -> ducking chain -> analyser -> destination
+		trackSource.connect(ducker.input);
+		ducker.output.connect(analyser);
 		analyser.connect(audio.ctx.destination);
 		trackSource.start();
 
@@ -342,6 +351,8 @@ export function createEngine(
 			cancelAnimationFrame(rafId);
 			input.stop();
 			try { trackSource?.stop(); } catch { /* already stopped */ }
+			ducker?.destroy();
+			ducker = null;
 			audio.stop();
 
 			// Reset state
@@ -364,6 +375,8 @@ export function createEngine(
 			cancelAnimationFrame(rafId);
 			input.stop();
 			try { trackSource?.stop(); } catch { /* already stopped */ }
+			ducker?.destroy();
+			ducker = null;
 			audio.stop();
 			window.removeEventListener('resize', onResize);
 		},

@@ -1,49 +1,19 @@
-import type { Chart, Lane, MusicStyle, Note } from '$lib/game/types.js';
+import type { Chart, Difficulty, MusicStyle, Note } from '$lib/game/types.js';
+import { generateMusicSchedule } from '$lib/game/audio.js';
+import { generateChartFromMusic } from '$lib/game/chart-from-music.js';
 
 // ---------------------------------------------------------------------------
-// Note generation helpers
+// Music-synced chart generation: charts are derived FROM the music schedule
 // ---------------------------------------------------------------------------
 
-type NotePattern = {
-	lanes: Lane[];
-	/** Optional hold duration in seconds for all notes in this step. */
-	hold?: number;
-};
-
-function generateNotes(
+function generateSyncedChart(
 	bpm: number,
 	durationSec: number,
-	patterns: (Lane[] | NotePattern)[],
-	opts: { leadInBeats?: number; skipEveryOther?: number } = {},
+	difficulty: Difficulty,
+	style?: MusicStyle,
 ): Note[] {
-	const notes: Note[] = [];
-	const beatInterval = 60 / bpm;
-	const leadIn = opts.leadInBeats ?? 2;
-	const skipThreshold = opts.skipEveryOther ?? 0;
-
-	let beat = 0;
-	let patternIdx = 0;
-	let t = beatInterval * leadIn;
-
-	while (t < durationSec) {
-		const raw = patterns[patternIdx % patterns.length];
-		const isPlainArray = Array.isArray(raw) && (raw.length === 0 || typeof raw[0] === 'number');
-		const lanes: Lane[] = isPlainArray ? raw as Lane[] : (raw as NotePattern).lanes;
-		const hold = isPlainArray ? undefined : (raw as NotePattern).hold;
-
-		for (const lane of lanes) {
-			const note: Note = { t: Math.round(t * 1000) / 1000, lane };
-			if (hold && hold > 0) note.duration = hold;
-			notes.push(note);
-		}
-
-		const skip = beat < skipThreshold ? 2 : 1;
-		t += beatInterval * skip;
-		beat += skip;
-		patternIdx++;
-	}
-
-	return notes;
+	const schedule = generateMusicSchedule(bpm, durationSec, style);
+	return generateChartFromMusic(schedule, difficulty, bpm);
 }
 
 // ---------------------------------------------------------------------------
@@ -77,12 +47,8 @@ export const CHART_IDS = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// 1. First Steps — easy, 100 BPM, single-lane, every other beat
+// 1. First Steps — easy, 100 BPM, no style (default metronome-like backing)
 // ---------------------------------------------------------------------------
-
-const firstStepsPatterns: Lane[][] = [
-	[1], [1], [0], [1], [2], [1], [0], [1],
-];
 
 export const FIRST_STEPS_CHART: Chart = {
 	id: CHART_IDS.firstSteps,
@@ -90,16 +56,12 @@ export const FIRST_STEPS_CHART: Chart = {
 	difficulty: 'easy',
 	bpm: 100,
 	offsetMs: 0,
-	notes: generateNotes(100, 30, firstStepsPatterns, { skipEveryOther: 999 }), // always skip = every other beat
+	notes: generateSyncedChart(100, 30, 'easy'),
 };
 
 // ---------------------------------------------------------------------------
-// 2. Demo Beat — normal, 120 BPM (original chart)
+// 2. Demo Beat — normal, 120 BPM (default backing)
 // ---------------------------------------------------------------------------
-
-const demoBeatPatterns: Lane[][] = [
-	[0], [1], [2], [1], [0, 2], [1], [0], [2],
-];
 
 export const DEMO_CHART: Chart = {
 	id: CHART_IDS.demoBeat,
@@ -107,17 +69,12 @@ export const DEMO_CHART: Chart = {
 	difficulty: 'normal',
 	bpm: 120,
 	offsetMs: 0,
-	notes: generateNotes(120, 30, demoBeatPatterns, { skipEveryOther: 8 }),
+	notes: generateSyncedChart(120, 30, 'normal'),
 };
 
 // ---------------------------------------------------------------------------
 // 3. Electric Rush — normal, 140 BPM, electro style
 // ---------------------------------------------------------------------------
-
-const electricRushPatterns: Lane[][] = [
-	[0], [2], [1], [0, 2], [1], [0], [2], [1],
-	[0, 1], [2], [0], [1, 2], [0], [2], [1], [0],
-];
 
 export const ELECTRIC_RUSH_CHART: Chart = {
 	id: CHART_IDS.electricRush,
@@ -125,7 +82,7 @@ export const ELECTRIC_RUSH_CHART: Chart = {
 	difficulty: 'normal',
 	bpm: 140,
 	offsetMs: 0,
-	notes: generateNotes(140, 35, electricRushPatterns, { skipEveryOther: 4 }),
+	notes: generateSyncedChart(140, 35, 'normal', 'electro'),
 	style: 'electro',
 };
 
@@ -133,19 +90,13 @@ export const ELECTRIC_RUSH_CHART: Chart = {
 // 4. Drum & Bass Fury — hard, 170 BPM, dnb style
 // ---------------------------------------------------------------------------
 
-const dnbFuryPatterns: Lane[][] = [
-	[0], [1], [2], [0, 1], [2], [1], [0, 2], [1],
-	[0], [2], [1, 2], [0], [1], [0, 1, 2], [0], [2],
-	[1], [0], [2], [1], [0, 2], [1], [2], [0],
-];
-
 export const DNB_FURY_CHART: Chart = {
 	id: CHART_IDS.dnbFury,
 	songId: SONG_IDS.dnbFury,
 	difficulty: 'hard',
 	bpm: 170,
 	offsetMs: 0,
-	notes: generateNotes(170, 40, dnbFuryPatterns),
+	notes: generateSyncedChart(170, 40, 'hard', 'dnb'),
 	style: 'dnb',
 };
 
@@ -153,42 +104,19 @@ export const DNB_FURY_CHART: Chart = {
 // 5. Midnight Chill — easy, 90 BPM, chill style
 // ---------------------------------------------------------------------------
 
-const chillPatterns: Lane[][] = [
-	[1], [0], [2], [1], [0], [1], [2], [1],
-];
-
 export const MIDNIGHT_CHILL_CHART: Chart = {
 	id: CHART_IDS.midnightChill,
 	songId: SONG_IDS.midnightChill,
 	difficulty: 'easy',
 	bpm: 90,
 	offsetMs: 0,
-	notes: generateNotes(90, 35, chillPatterns, { skipEveryOther: 999 }),
+	notes: generateSyncedChart(90, 35, 'easy', 'chill'),
 	style: 'chill',
 };
 
 // ---------------------------------------------------------------------------
-// 6. Neon Nights — normal, 128 BPM, electro, 45 sec, hold notes mixed with taps
+// 6. Neon Nights — normal, 128 BPM, electro
 // ---------------------------------------------------------------------------
-
-const neonNightsPatterns: (Lane[] | NotePattern)[] = [
-	// Intro: gentle taps
-	[1], [0], [2], [1],
-	// Build: introduce holds
-	{ lanes: [0], hold: 1.5 }, [2], [1], [0],
-	[1], { lanes: [2], hold: 1.0 }, [0], [1],
-	// Chorus: hold one lane while tapping another
-	{ lanes: [0], hold: 2.0 }, [1], [2], [1],
-	[2], { lanes: [1], hold: 1.5 }, [0], [2],
-	// Intense: dense taps + holds
-	[0, 2], [1], { lanes: [0], hold: 1.0 }, [2],
-	[1], [0], { lanes: [2], hold: 2.0 }, [1],
-	// Breakdown: breathing room
-	[1], [], [0], [],
-	{ lanes: [1], hold: 3.0 }, [], [2], [0],
-	// Outro: big holds
-	{ lanes: [0], hold: 2.5 }, [1], { lanes: [2], hold: 2.0 }, [1],
-];
 
 export const NEON_NIGHTS_CHART: Chart = {
 	id: CHART_IDS.neonNights,
@@ -196,30 +124,13 @@ export const NEON_NIGHTS_CHART: Chart = {
 	difficulty: 'normal',
 	bpm: 128,
 	offsetMs: 0,
-	notes: generateNotes(128, 45, neonNightsPatterns),
+	notes: generateSyncedChart(128, 45, 'normal', 'electro'),
 	style: 'electro',
 };
 
 // ---------------------------------------------------------------------------
-// 7. Breakbeat Madness — hard, 160 BPM, dnb, 40 sec, fast taps + strategic holds
+// 7. Breakbeat Madness — hard, 160 BPM, dnb
 // ---------------------------------------------------------------------------
-
-const breakbeatPatterns: (Lane[] | NotePattern)[] = [
-	// Fast tap intro
-	[0], [1], [2], [0, 1], [2], [1], [0], [2],
-	// Speed up with doubles
-	[0, 2], [1], [0], [1, 2], [0], [2], [1, 0], [2],
-	// Strategic holds amidst chaos
-	{ lanes: [0], hold: 0.8 }, [1], [2], [1],
-	[2], [0], { lanes: [1], hold: 0.5 }, [2],
-	// Intense section: hold + tap combos
-	{ lanes: [0], hold: 1.0 }, [2], [1], [2],
-	[0, 1], [2], { lanes: [2], hold: 0.7 }, [0],
-	// Breakdown
-	[1], { lanes: [0], hold: 1.5 }, [2], [1],
-	// Final burst
-	[0, 1, 2], [0], [2], [1], [0, 2], [1], [0], [1, 2],
-];
 
 export const BREAKBEAT_CHART: Chart = {
 	id: CHART_IDS.breakbeat,
@@ -227,31 +138,13 @@ export const BREAKBEAT_CHART: Chart = {
 	difficulty: 'hard',
 	bpm: 160,
 	offsetMs: 0,
-	notes: generateNotes(160, 40, breakbeatPatterns),
+	notes: generateSyncedChart(160, 40, 'hard', 'dnb'),
 	style: 'dnb',
 };
 
 // ---------------------------------------------------------------------------
-// 8. Sunset Waves — easy, 85 BPM, chill, 50 sec, long flowing holds
+// 8. Sunset Waves — easy, 85 BPM, chill
 // ---------------------------------------------------------------------------
-
-const sunsetWavesPatterns: (Lane[] | NotePattern)[] = [
-	// Calm opening with long holds
-	{ lanes: [1], hold: 3.0 }, [], [], [],
-	{ lanes: [0], hold: 2.5 }, [], [2], [],
-	{ lanes: [2], hold: 3.0 }, [], [], [],
-	{ lanes: [1], hold: 2.0 }, [], [0], [],
-	// Gentle taps between holds
-	[0], [], { lanes: [1], hold: 2.5 }, [],
-	[2], [], { lanes: [0], hold: 2.0 }, [],
-	// Flowing section: overlapping feel
-	{ lanes: [0], hold: 2.0 }, [2], [], [1],
-	{ lanes: [2], hold: 2.5 }, [0], [], [1],
-	// Rest
-	[], [], [1], [],
-	// Grand finale hold
-	{ lanes: [1], hold: 3.0 }, [], { lanes: [0], hold: 2.0 }, [],
-];
 
 export const SUNSET_WAVES_CHART: Chart = {
 	id: CHART_IDS.sunsetWaves,
@@ -259,35 +152,13 @@ export const SUNSET_WAVES_CHART: Chart = {
 	difficulty: 'easy',
 	bpm: 85,
 	offsetMs: 0,
-	notes: generateNotes(85, 50, sunsetWavesPatterns, { skipEveryOther: 999 }),
+	notes: generateSyncedChart(85, 50, 'easy', 'chill'),
 	style: 'chill',
 };
 
 // ---------------------------------------------------------------------------
-// 9. Cyber Punk 2099 — hard, 150 BPM, electro, 45 sec, complex hold+tap combos
+// 9. Cyber Punk 2099 — hard, 150 BPM, electro
 // ---------------------------------------------------------------------------
-
-const cyberPunkPatterns: (Lane[] | NotePattern)[] = [
-	// Aggressive opening
-	[0], [1], [2], [0, 2],
-	[1], [0], [2], [1, 2],
-	// Hold + simultaneous tap (hold lane 0, tap 1 and 2)
-	{ lanes: [0], hold: 1.5 }, [1], [2], [1],
-	[2], [1], { lanes: [2], hold: 1.5 }, [0],
-	// Complex doubles with holds
-	[0, 1], [2], { lanes: [1], hold: 1.0 }, [0, 2],
-	[1], { lanes: [0], hold: 0.8 }, [2], [1],
-	// Intense section
-	[0, 2], [1], [0], { lanes: [2], hold: 1.2 },
-	[0, 1], [2], [0], [1, 2],
-	{ lanes: [0], hold: 2.0 }, [1], [2], [1],
-	// Triples and holds
-	[0, 1, 2], [1], { lanes: [0], hold: 0.5 }, [2],
-	[1], [0, 2], { lanes: [1], hold: 1.0 }, [0],
-	// Brief rest then finale
-	[], [1], [], [0],
-	{ lanes: [1], hold: 2.0 }, [0, 2], [1], { lanes: [0, 2], hold: 1.5 },
-];
 
 export const CYBER_PUNK_CHART: Chart = {
 	id: CHART_IDS.cyberPunk,
@@ -295,33 +166,13 @@ export const CYBER_PUNK_CHART: Chart = {
 	difficulty: 'hard',
 	bpm: 150,
 	offsetMs: 0,
-	notes: generateNotes(150, 45, cyberPunkPatterns),
+	notes: generateSyncedChart(150, 45, 'hard', 'electro'),
 	style: 'electro',
 };
 
 // ---------------------------------------------------------------------------
-// 10. Liquid Dreams — normal, 130 BPM, chill, 45 sec, nice mix
+// 10. Liquid Dreams — normal, 130 BPM, chill
 // ---------------------------------------------------------------------------
-
-const liquidDreamsPatterns: (Lane[] | NotePattern)[] = [
-	// Smooth intro
-	[1], [0], [2], [1],
-	[0], [2], [1], [0],
-	// Introduce holds gently
-	{ lanes: [1], hold: 1.5 }, [0], [2], [0],
-	[1], { lanes: [2], hold: 1.5 }, [0], [1],
-	// Medium density mix
-	[0], [1], { lanes: [2], hold: 1.0 }, [1],
-	{ lanes: [0], hold: 2.0 }, [1], [2], [1],
-	// Build up
-	[0, 2], [1], [0], [2],
-	[1], [0, 2], { lanes: [1], hold: 1.5 }, [0],
-	// Chill section with long holds
-	{ lanes: [0], hold: 2.5 }, [], [2], [],
-	{ lanes: [1], hold: 2.0 }, [], [0], [2],
-	// Closing taps
-	[1], [0], [2], [1], [0], [2], [1], [0],
-];
 
 export const LIQUID_DREAMS_CHART: Chart = {
 	id: CHART_IDS.liquidDreams,
@@ -329,7 +180,7 @@ export const LIQUID_DREAMS_CHART: Chart = {
 	difficulty: 'normal',
 	bpm: 130,
 	offsetMs: 0,
-	notes: generateNotes(130, 45, liquidDreamsPatterns),
+	notes: generateSyncedChart(130, 45, 'normal', 'chill'),
 	style: 'chill',
 };
 
