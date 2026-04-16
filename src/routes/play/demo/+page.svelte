@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { createEngine, type Engine } from '$lib/game/engine.js';
+	import { menuMusic } from '$lib/game/menu-music-store.js';
 	import { DEMO_CHART } from '$lib/chart/songs.js';
 	import { createAutoplay, type Autoplay, type InputSimulator } from '$lib/game/autoplay.js';
 	import { loadSettings, settingsToConfig } from '$lib/game/settings.js';
@@ -52,6 +53,7 @@
 	}
 
 	onMount(() => {
+		menuMusic.fadeOutAndStop(0.5);
 		initEngine();
 
 		return () => {

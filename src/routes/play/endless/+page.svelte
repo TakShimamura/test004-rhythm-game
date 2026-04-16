@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { createEngine, type Engine } from '$lib/game/engine.js';
+	import { menuMusic } from '$lib/game/menu-music-store.js';
 	import { accuracy } from '$lib/game/scoring.js';
 	import { loadSettings, settingsToConfig } from '$lib/game/settings.js';
 	import type { Chart, GameState, GameModeConfig, ScoreState } from '$lib/game/types.js';
@@ -62,6 +63,8 @@
 	});
 
 	onMount(() => {
+		menuMusic.fadeOutAndStop(0.5);
+
 		const settings = loadSettings();
 		const config = settingsToConfig(settings);
 		laneKeys = settings.laneKeys;

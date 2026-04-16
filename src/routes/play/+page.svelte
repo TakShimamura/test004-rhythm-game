@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { createEngine, type Engine } from '$lib/game/engine.js';
+	import { menuMusic } from '$lib/game/menu-music-store.js';
 	import { DEMO_CHART, ALL_CHARTS } from '$lib/chart/songs.js';
 	import { accuracy } from '$lib/game/scoring.js';
 	import { loadSettings, saveSettings, settingsToConfig } from '$lib/game/settings.js';
@@ -162,6 +163,9 @@
 	}
 
 	onMount(() => {
+		// Ensure menu music is stopped when entering the play page
+		menuMusic.fadeOutAndStop(0.5);
+
 		isMobile = 'ontouchstart' in window || window.innerWidth < 768;
 
 		const settings = loadSettings();
@@ -220,6 +224,9 @@
 	});
 
 	function handleStart() {
+		// Crossfade menu music out before gameplay starts
+		menuMusic.fadeOutAndStop(0.5);
+
 		// Re-init engine with latest mode config before starting
 		if (loadedChart) {
 			initEngine(loadedChart);

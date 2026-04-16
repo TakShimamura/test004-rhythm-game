@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { authClient } from '$lib/auth-client.js';
 	import Tooltip from '$lib/components/Tooltip.svelte';
+	import { createAudioPreview } from '$lib/game/audio-preview.js';
 
 	type SongChart = { id: string; difficulty: string };
 	type Song = {
@@ -11,6 +12,7 @@
 		bpm: number;
 		durationMs: number;
 		audioUrl: string;
+		style?: string;
 		charts: SongChart[];
 	};
 
@@ -20,7 +22,30 @@
 	let loading = $state(true);
 	let search = $state('');
 	let ratings: Record<string, ChartRating> = $state({});
+	let commentCounts: Record<string, number> = $state({});
+	let previewingSongId: string | null = $state(null);
 	const session = authClient.useSession();
+
+	const preview = createAudioPreview();
+
+	function handleSongHover(song: Song) {
+		if (song.audioUrl === '__metronome__') return;
+		previewingSongId = song.id;
+		preview.play(
+			song.audioUrl,
+			song.bpm,
+			song.style as 'electro' | 'dnb' | 'chill' | undefined,
+		);
+	}
+
+	function handleSongLeave() {
+		preview.stop();
+		previewingSongId = null;
+	}
+
+	onDestroy(() => {
+		preview.stop();
+	});
 
 	onMount(async () => {
 		const listRes = await fetch('/api/songs');
@@ -47,6 +72,19 @@
 		);
 		for (const r of ratingResults) {
 			if (r) ratings[r.id] = { average: r.average, count: r.count };
+		}
+
+		// Fetch comment counts for all charts
+		const commentResults = await Promise.all(
+			allCharts.map(async (c) => {
+				const res = await fetch(`/api/charts/${c.id}/comments`);
+				if (!res.ok) return null;
+				const data = await res.json();
+				return { id: c.id, count: Array.isArray(data) ? data.length : 0 };
+			}),
+		);
+		for (const r of commentResults) {
+			if (r) commentCounts[r.id] = r.count;
 		}
 
 		loading = false;
@@ -87,10 +125,18 @@
 	{:else}
 		<div class="song-list">
 			{#each filtered as song}
-				<div class="song-card">
+				<div
+					class="song-card"
+					onmouseenter={() => handleSongHover(song)}
+					onmouseleave={() => handleSongLeave()}
+					role="listitem"
+				>
 					<div class="song-info">
 						<a href="/stats/song/{song.id}" class="song-title-link">{song.title}</a>
 						<span class="song-artist">{song.artist}</span>
+						{#if previewingSongId === song.id}
+							<span class="preview-badge">PREVIEW</span>
+						{/if}
 					</div>
 					<div class="song-meta">
 						<span class="bpm">{song.bpm} BPM</span>
@@ -103,6 +149,11 @@
 								{#if ratings[chart.id]?.average !== undefined && ratings[chart.id]?.average !== null}
 									<span class="chart-rating" title="{ratings[chart.id].average?.toFixed(1)} ({ratings[chart.id].count} ratings)">
 										{ratings[chart.id].average?.toFixed(1)} &#9733;
+									</span>
+								{/if}
+								{#if commentCounts[chart.id] > 0}
+									<span class="comment-count" title="{commentCounts[chart.id]} comments">
+										{commentCounts[chart.id]}
 									</span>
 								{/if}
 							</a>
@@ -276,6 +327,38 @@
 		color: #ffdd00;
 		font-size: 10px;
 		margin-left: 4px;
+	}
+
+	.comment-count {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 9px;
+		min-width: 16px;
+		height: 14px;
+		padding: 0 3px;
+		margin-left: 3px;
+		background: #4488ff25;
+		border: 1px solid #4488ff55;
+		color: #4488ff;
+		border-radius: 7px;
+	}
+
+	.preview-badge {
+		display: inline-block;
+		font-size: 9px;
+		letter-spacing: 2px;
+		color: #44ff66;
+		background: #44ff6618;
+		border: 1px solid #44ff6644;
+		padding: 1px 6px;
+		margin-left: 6px;
+		animation: previewPulse 1s ease-in-out infinite;
+	}
+
+	@keyframes previewPulse {
+		0%, 100% { opacity: 0.7; }
+		50% { opacity: 1; }
 	}
 
 	/* Mobile responsive */

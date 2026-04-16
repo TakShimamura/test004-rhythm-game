@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, real, timestamp, jsonb, bigint, primaryKey, unique } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, real, timestamp, jsonb, bigint, primaryKey, unique, boolean } from 'drizzle-orm/pg-core';
 import { user } from './auth.schema.js';
 
 export { user };
@@ -74,5 +74,47 @@ export const dailyChallenges = pgTable('daily_challenges', {
 	date: text('date').notNull().unique(),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const chartComments = pgTable('chart_comments', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	userId: text('user_id').references(() => user.id).notNull(),
+	chartId: uuid('chart_id').references(() => charts.id).notNull(),
+	text: text('text').notNull(),
+	timestamp: real('timestamp'),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const chartCollections = pgTable('chart_collections', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	userId: text('user_id').references(() => user.id).notNull(),
+	name: text('name').notNull(),
+	description: text('description'),
+	isPublic: boolean('is_public').default(true).notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const collectionItems = pgTable('collection_items', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	collectionId: uuid('collection_id').references(() => chartCollections.id).notNull(),
+	chartId: uuid('chart_id').references(() => charts.id).notNull(),
+	addedAt: timestamp('added_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const featuredCharts = pgTable('featured_charts', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	chartId: uuid('chart_id').references(() => charts.id).notNull(),
+	featuredAt: timestamp('featured_at', { withTimezone: true }).defaultNow().notNull(),
+	expiresAt: timestamp('expires_at', { withTimezone: true }),
+});
+
+export const difficultyVotes = pgTable('difficulty_votes', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	userId: text('user_id').references(() => user.id).notNull(),
+	chartId: uuid('chart_id').references(() => charts.id).notNull(),
+	vote: text('vote').notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+	unique('difficulty_votes_user_chart').on(table.userId, table.chartId),
+]);
 
 export * from './auth.schema.js';

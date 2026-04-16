@@ -1,8 +1,19 @@
 <script lang="ts">
 	import { authClient } from '$lib/auth-client.js';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import { menuMusic } from '$lib/game/menu-music-store.js';
 
 	const session = authClient.useSession();
+
+	type FeaturedChart = {
+		chartId: string;
+		difficulty: string;
+		songTitle: string;
+		songArtist: string;
+		bpm: number;
+		avgRating: number | null;
+		ratingCount: number;
+	};
 
 	type DailyChallenge = {
 		date: string;
@@ -21,15 +32,20 @@
 
 	let daily: DailyChallenge | null = $state(null);
 	let dailyTop: DailyScore[] = $state([]);
+	let featured: FeaturedChart[] = $state([]);
 	let showTutorialPrompt = $state(false);
 
 	onMount(async () => {
+		// Start ambient menu music (uses singleton — persists across nav)
+		menuMusic.start();
+
 		const tutorialDone = localStorage.getItem('tutorial-completed');
 		showTutorialPrompt = !tutorialDone;
 
-		const [challengeRes, lbRes] = await Promise.all([
+		const [challengeRes, lbRes, featuredRes] = await Promise.all([
 			fetch('/api/daily-challenge'),
 			fetch('/api/daily-challenge/leaderboard'),
+			fetch('/api/featured'),
 		]);
 
 		if (challengeRes.ok) {
@@ -39,6 +55,14 @@
 			const all = await lbRes.json();
 			dailyTop = all.slice(0, 3);
 		}
+		if (featuredRes.ok) {
+			const all = await featuredRes.json();
+			featured = all.slice(0, 3);
+		}
+	});
+
+	onDestroy(() => {
+		menuMusic.stop();
 	});
 </script>
 
@@ -80,8 +104,28 @@
 			</div>
 		{/if}
 
+		{#if featured.length > 0}
+			<div class="featured-widget">
+				<div class="featured-header">FEATURED</div>
+				<div class="featured-list">
+					{#each featured as f}
+						<a href="/play?chart={f.chartId}" class="featured-card">
+							<span class="featured-title">{f.songTitle}</span>
+							<div class="featured-meta">
+								<span class="featured-diff">{f.difficulty.toUpperCase()}</span>
+								{#if f.avgRating !== null}
+									<span class="featured-rating">{f.avgRating.toFixed(1)} &#9733;</span>
+								{/if}
+							</div>
+						</a>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
 		<div class="nav-links">
 			<a href="/songs" class="nav-link">SONGS</a>
+			<a href="/collections" class="nav-link">COLLECTIONS</a>
 			<a href="/leaderboard" class="nav-link">LEADERBOARD</a>
 			<a href="/feed" class="nav-link">FEED</a>
 			<a href="/stats" class="nav-link">STATS</a>
@@ -403,6 +447,70 @@
 	.daily-name { color: #aaa; }
 	.daily-score { color: #4488ff; }
 
+	/* Featured Widget */
+	.featured-widget {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 10px;
+		margin-top: 12px;
+		padding: 16px 24px;
+		background: #111118;
+		border: 1px solid #4488ff33;
+		max-width: 360px;
+		width: 100%;
+	}
+
+	.featured-header {
+		font-size: 11px;
+		letter-spacing: 3px;
+		color: #4488ff;
+	}
+
+	.featured-list {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		width: 100%;
+	}
+
+	.featured-card {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 8px 10px;
+		background: #0d0d14;
+		border: 1px solid #1a1a2a;
+		text-decoration: none;
+		color: #ddd;
+		transition: border-color 0.2s;
+	}
+
+	.featured-card:hover {
+		border-color: #4488ff;
+	}
+
+	.featured-title {
+		font-size: 13px;
+	}
+
+	.featured-meta {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.featured-diff {
+		font-size: 10px;
+		color: #4488ff;
+		letter-spacing: 1px;
+	}
+
+	.featured-rating {
+		font-size: 10px;
+		color: #ffdd00;
+	}
+
 	/* Mobile responsive */
 	@media (max-width: 768px) {
 		h1 {
@@ -435,7 +543,7 @@
 			padding: 12px 28px;
 		}
 
-		.daily-widget {
+		.daily-widget, .featured-widget {
 			max-width: 90vw;
 			padding: 12px 16px;
 		}

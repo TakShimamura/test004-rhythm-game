@@ -255,15 +255,26 @@ export function createEngine(
 		flashes,
 	);
 
+	// AnalyserNode for FFT visualization (passive — does not affect audio clock)
+	let analyser: AnalyserNode | null = null;
+
 	function startPlayback() {
 		audio.start();
+
+		// Create AnalyserNode for FFT-based visualization
+		analyser = audio.ctx.createAnalyser();
+		analyser.fftSize = 256;
+		analyser.smoothingTimeConstant = 0.7;
+		renderer.setAnalyser(analyser);
 
 		const lastNote = playChart.notes[playChart.notes.length - 1];
 		const trackDuration = lastNote ? lastNote.t + 3 : 30;
 		const buffer = generateBackingTrack(audio.ctx, playChart.bpm, trackDuration, playChart.style);
 		trackSource = audio.ctx.createBufferSource();
 		trackSource.buffer = buffer;
-		trackSource.connect(audio.ctx.destination);
+		// Route: source -> analyser -> destination
+		trackSource.connect(analyser);
+		analyser.connect(audio.ctx.destination);
 		trackSource.start();
 
 		input.start();

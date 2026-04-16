@@ -83,6 +83,8 @@ export type Renderer = {
 	triggerShake: () => void;
 	/** Trigger full combo celebration */
 	triggerFullCombo: () => void;
+	/** Connect an AnalyserNode for FFT-based audio visualization */
+	setAnalyser: (analyser: AnalyserNode) => void;
 };
 
 export function createRenderer({ canvas, chart, config }: RendererOptions): Renderer {
@@ -123,6 +125,56 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 
 	const beatDuration = 60 / chart.bpm;
 	const theme = chart.style ? STYLE_THEMES[chart.style] : DEFAULT_THEME;
+
+	// ----- Audio visualizer state -----
+	let analyserNode: AnalyserNode | null = null;
+	let frequencyData: Uint8Array<ArrayBuffer> | null = null;
+	const VISUALIZER_BAR_COUNT = 32;
+
+	function setAnalyser(analyser: AnalyserNode) {
+		analyserNode = analyser;
+		frequencyData = new Uint8Array(analyser.frequencyBinCount);
+	}
+
+	function drawVisualizerBars(beatPulse: number) {
+		if (!analyserNode || !frequencyData) return;
+		analyserNode.getByteFrequencyData(frequencyData);
+
+		const hitZoneY = h * HIT_ZONE_Y_RATIO;
+		const { left, lw } = getHighwayXAtY(hitZoneY);
+		const highwayWidth = lw * 3;
+		const barWidth = highwayWidth / VISUALIZER_BAR_COUNT;
+		const maxBarHeight = h * 0.25;
+		// Subtle beat pulse multiplier
+		const pulseScale = 1 + beatPulse * 0.15;
+
+		// Map frequency bins to our bar count
+		const binStep = Math.floor(frequencyData.length / VISUALIZER_BAR_COUNT);
+
+		ctx.save();
+		for (let i = 0; i < VISUALIZER_BAR_COUNT; i++) {
+			// Average a few bins per bar for smoother look
+			let sum = 0;
+			for (let b = 0; b < binStep; b++) {
+				sum += frequencyData[i * binStep + b];
+			}
+			const amplitude = (sum / binStep) / 255;
+			const barHeight = amplitude * maxBarHeight * pulseScale;
+
+			if (barHeight < 1) continue;
+
+			const x = left + i * barWidth;
+			const y = hitZoneY - barHeight;
+
+			// Pick lane color based on position (spread across 3 lanes)
+			const laneIdx = Math.min(2, Math.floor((i / VISUALIZER_BAR_COUNT) * 3));
+			const alpha = 0.15 + amplitude * 0.15; // 0.15 to 0.3 range
+
+			ctx.fillStyle = `rgba(${LANE_RGB[laneIdx]}, ${alpha})`;
+			ctx.fillRect(x + 1, y, barWidth - 2, barHeight);
+		}
+		ctx.restore();
+	}
 
 	// ----- Highway theme ambient particle state -----
 	type AmbientParticle = { x: number; y: number; vx: number; vy: number; size: number; life: number; maxLife: number; hue: number; type: string };
@@ -1257,6 +1309,9 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		// animated background (combo-reactive)
 		drawBackground(currentTime, score.combo, beatPulse);
 
+		// FFT audio visualizer bars (behind notes, on top of background)
+		drawVisualizerBars(beatPulse);
+
 		// starfield with parallax and streak effects
 		drawStarfield(dt, score.combo);
 
@@ -1598,5 +1653,5 @@ export function createRenderer({ canvas, chart, config }: RendererOptions): Rend
 		}
 	}
 
-	return { resize, draw, spawnParticles, spawnHoldBurstParticles, triggerShake, triggerFullCombo };
+	return { resize, draw, spawnParticles, spawnHoldBurstParticles, triggerShake, triggerFullCombo, setAnalyser };
 }
